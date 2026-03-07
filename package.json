@@ -1,5 +1,5 @@
 {
-  "name": "@needle-tools/vite-template",
+  "name": "barbie-storybook",
   "version": "1.0.0",
   "scripts": {
     "dev": "vite --host",
@@ -7,7 +7,7 @@
     "build": "vite build -- --production",
     "build:production": "npm run build",
     "build:dev": "vite build",
-    "deploy": "npm run build && npx --yes needle-cloud deploy dist --token"
+    "deploy": "npm run build && npx --yes needle-cloud deploy ./dist --name barbie-storybook --token %NEEDLE_CLOUD_TOKEN%"
   },
   "dependencies": {
     "@needle-tools/engine": "^4.15.0",
@@ -16,10 +16,10 @@
   "devDependencies": {
     "@needle-tools/helper": "^1.11.4",
     "@types/three": "0.169.0",
-    "@vitejs/plugin-basic-ssl": "^1.0.1",
     "typescript": "^5.0.4",
     "vite": "<= 4.3.9",
-    "vite-plugin-compression": "^0.5.1"
+    "vite-plugin-compression": "^0.5.1",
+    "vite-plugin-mkcert": "^1.17.8"
   },
   "author": {
     "name": "Needle Tools",

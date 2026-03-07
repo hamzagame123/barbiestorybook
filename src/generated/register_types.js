@@ -1,7 +1,10 @@
-﻿import { TypeStore } from "@needle-tools/engine"
+import { TypeStore } from "@needle-tools/engine";
+import { ARPlacement } from "../components/ARPlacement.ts";
+import { CharacterSpawner } from "../components/CharacterSpawner.ts";
+import { HUD } from "../components/HUD.ts";
+import { ScrapbookUI } from "../components/ScrapbookUI.ts";
 
-// Import types
-// import { ChangeMaterial } from "../scripts/ChangeColor";
-
-// Register types
-// TypeStore.add("ChangeMaterial", ChangeMaterial);
+TypeStore.add("ARPlacement", ARPlacement);
+TypeStore.add("CharacterSpawner", CharacterSpawner);
+TypeStore.add("HUD", HUD);
+TypeStore.add("ScrapbookUI", ScrapbookUI);

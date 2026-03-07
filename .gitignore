@@ -7,4 +7,6 @@ include/three-mesh-ui-assets/
 include/fonts/
 build.log
 dist
+.playwright-cli
 .DS_Store
+src/secrets.ts

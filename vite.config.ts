@@ -1,5 +1,6 @@
 import { defineConfig } from 'vite';
 import viteCompression from 'vite-plugin-compression';
+import mkcert from 'vite-plugin-mkcert';
 
 export default defineConfig(async ({ command }) => {
     const { needlePlugins, useGzip, loadConfig } = await import("@needle-tools/engine/plugins/vite/index.js");
@@ -7,11 +8,12 @@ export default defineConfig(async ({ command }) => {
     return {
         base: "./",
         plugins: [
+            mkcert(),
             useGzip(needleConfig) ? viteCompression({ deleteOriginFile: true }) : null,
             needlePlugins(command, needleConfig, { noPoster: true, allowHotReload: false }),
         ],
         server: {
-            https: false,
+            https: true,
             proxy: {
               'https://localhost:3000': 'https://localhost:3000',
             },
