@@ -1,6 +1,6 @@
 import { FAL_API_KEY } from "../secrets";
 
-const RODIN_QUEUE_URL = "https://queue.fal.run/fal-ai/hyper3d-rodin";
+const RODIN_QUEUE_URL = "https://queue.fal.run/fal-ai/hyper3d/rodin";
 const POLL_INTERVAL_MS = 2500;
 const TIMEOUT_MS = 90_000;
 
@@ -19,6 +19,8 @@ export class RodinClientError extends Error {
 
 type QueueSubmitResponse = {
     request_id?: string;
+    status_url?: string;
+    response_url?: string;
 };
 
 type QueueLog = {
@@ -107,9 +109,12 @@ export async function generateCharacter(
             throw new RodinClientError(RodinError.InvalidResponse, "Rodin did not return a request id.");
         }
 
+        const statusUrl = submitData.status_url ?? `https://queue.fal.run/fal-ai/hyper3d/requests/${requestId}/status`;
+        const responseUrl = submitData.response_url ?? `https://queue.fal.run/fal-ai/hyper3d/requests/${requestId}`;
+
         const startedAt = Date.now();
         while (Date.now() - startedAt < TIMEOUT_MS) {
-            const statusResponse = await fetch(`${RODIN_QUEUE_URL}/requests/${requestId}/status?logs=1`, {
+            const statusResponse = await fetch(`${statusUrl}${statusUrl.includes("?") ? "&" : "?"}logs=1`, {
                 method: "GET",
                 headers: {
                     Authorization: `Key ${FAL_API_KEY}`,
@@ -121,7 +126,7 @@ export async function generateCharacter(
 
             if (statusData.status === "COMPLETED") {
                 onProgress?.("Almost ready...");
-                const resultResponse = await fetch(`${RODIN_QUEUE_URL}/requests/${requestId}`, {
+                const resultResponse = await fetch(responseUrl, {
                     method: "GET",
                     headers: {
                         Authorization: `Key ${FAL_API_KEY}`,

@@ -44,7 +44,7 @@ export class HUD extends Behaviour {
 
     private readonly onSurfaceChange = (event: Event) => {
         const customEvent = event as CustomEvent<{ surfaceDetected: boolean; placementConfirmed: boolean }>;
-        this.updateSurfaceBadge(customEvent.detail.surfaceDetected);
+        this.applySurfaceBadgeState(customEvent.detail.surfaceDetected, customEvent.detail.placementConfirmed);
     };
 
     awake(): void {
@@ -52,7 +52,7 @@ export class HUD extends Behaviour {
         this.injectMarkup();
         this.bindEvents();
         this.setupSpeechRecognition();
-        this.updateSurfaceBadge(ARPlacement.surfaceDetected);
+        this.applySurfaceBadgeState(ARPlacement.surfaceDetected, ARPlacement.placementConfirmed);
         this.updateActionState();
     }
 
@@ -294,6 +294,19 @@ export class HUD extends Behaviour {
         this.surfaceBadge.classList.toggle("is-ready", surfaceDetected);
     }
 
+    private applySurfaceBadgeState(surfaceDetected: boolean, placementConfirmed: boolean): void {
+        if (placementConfirmed) {
+            this.surfaceBadge.textContent = "PLACED";
+            this.surfaceBadge.classList.remove("is-ready");
+            this.surfaceBadge.classList.add("is-placed");
+            return;
+        }
+
+        this.surfaceBadge.textContent = surfaceDetected ? "SURFACE" : "SCANNING";
+        this.surfaceBadge.classList.toggle("is-ready", surfaceDetected);
+        this.surfaceBadge.classList.remove("is-placed");
+    }
+
     private updateActionState(): void {
         this.addButton.disabled = this.promptInput.value.trim().length === 0;
         this.captureButton.disabled = !this.captureEnabled;
@@ -380,6 +393,11 @@ export class HUD extends Behaviour {
             #surface-badge.is-ready {
                 color: #4ADE80;
                 border-color: rgba(74,222,128,0.4);
+            }
+
+            #surface-badge.is-placed {
+                color: #f9a8d4;
+                border-color: rgba(249,168,212,0.45);
             }
 
             #gallery-btn {
