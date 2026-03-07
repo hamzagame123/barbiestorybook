@@ -235,12 +235,24 @@ export class HUD extends Behaviour {
 
     private getOverlayHost(): HTMLElement {
         const host = this.context.domElement;
-        if (host instanceof HTMLElement) return host;
+        if (host instanceof HTMLElement) return this.getOrCreateOverlayRoot(host);
 
         const needleEngine = document.querySelector("needle-engine");
-        if (needleEngine instanceof HTMLElement) return needleEngine;
+        if (needleEngine instanceof HTMLElement) return this.getOrCreateOverlayRoot(needleEngine);
 
         return document.body;
+    }
+
+    private getOrCreateOverlayRoot(host: HTMLElement): HTMLElement {
+        const existingRoot = Array.from(host.children).find((child) => child instanceof HTMLElement && child.id === "barbie-overlay-root");
+        if (existingRoot instanceof HTMLElement) return existingRoot;
+
+        const overlayRoot = document.createElement("div");
+        overlayRoot.id = "barbie-overlay-root";
+        overlayRoot.className = "desktop ar";
+        overlayRoot.dataset.barbieOverlay = "true";
+        host.append(overlayRoot);
+        return overlayRoot;
     }
 
     private async handleCapture(): Promise<void> {
