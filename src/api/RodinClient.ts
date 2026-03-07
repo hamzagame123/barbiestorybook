@@ -2,7 +2,7 @@ import { FAL_API_KEY } from "../secrets";
 
 const RODIN_QUEUE_URL = "https://queue.fal.run/fal-ai/hyper3d/rodin";
 const POLL_INTERVAL_MS = 2500;
-const TIMEOUT_MS = 90_000;
+const TIMEOUT_MS = 180_000;
 
 export enum RodinError {
     Timeout = "timeout",
@@ -33,6 +33,13 @@ type QueueStatusResponse = {
 };
 
 type QueueResultResponse = {
+    model_mesh?: {
+        url?: string;
+    };
+    glb?: {
+        url?: string;
+    };
+    model_urls?: string[];
     response?: {
         model_mesh?: {
             url?: string;
@@ -135,6 +142,9 @@ export async function generateCharacter(
 
                 const resultData = await readJson<QueueResultResponse>(resultResponse, RodinError.APIError);
                 const glbUrl =
+                    resultData.model_mesh?.url ??
+                    resultData.glb?.url ??
+                    resultData.model_urls?.[0] ??
                     resultData.response?.model_mesh?.url ??
                     resultData.response?.glb?.url ??
                     resultData.response?.model_urls?.[0];
@@ -153,7 +163,7 @@ export async function generateCharacter(
             await sleep(POLL_INTERVAL_MS);
         }
 
-        throw new RodinClientError(RodinError.Timeout, "Rodin generation timed out after 90 seconds.");
+        throw new RodinClientError(RodinError.Timeout, "Rodin generation timed out after 180 seconds.");
     }
     catch (error) {
         if (error instanceof RodinClientError) throw error;
