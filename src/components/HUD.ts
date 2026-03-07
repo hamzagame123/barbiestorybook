@@ -1,10 +1,14 @@
 import { Behaviour, NeedleXRSession } from "@needle-tools/engine";
-import { generateCaption } from "../api/GeminiClient";
-import { generateCharacter, RodinClientError, RodinError } from "../api/RodinClient";
+import { generateBarbiePromptPack, generateCaption, generateRodinImagePrompt } from "../api/GeminiClient";
+import { generateReferenceImage, NanoBananaClientError, NanoBananaError, polishCaptureImage } from "../api/NanoBananaClient";
+import { generateCharacterFromImage, RodinClientError, RodinError } from "../api/RodinClient";
+import { generateWorld, WorldLabsClientError, WorldLabsError } from "../api/WorldLabsClient";
 import { savePage } from "../store/ScrapbookStore";
 import { ARPlacement } from "./ARPlacement";
 import { CharacterSpawner } from "./CharacterSpawner";
+import { SceneRig } from "./SceneRig";
 import { ScrapbookUI } from "./ScrapbookUI";
+import { WorldSpawner } from "./WorldSpawner";
 
 type SpeechRecognitionLike = EventTarget & {
     continuous: boolean;
@@ -32,15 +36,20 @@ export class HUD extends Behaviour {
     private surfaceBadge!: HTMLDivElement;
     private arButton!: HTMLButtonElement;
     private galleryButton!: HTMLButtonElement;
+    private magicButton!: HTMLButtonElement;
     private promptInput!: HTMLInputElement;
+    private worldInput!: HTMLInputElement;
     private speakButton!: HTMLButtonElement;
     private addButton!: HTMLButtonElement;
+    private buildWorldButton!: HTMLButtonElement;
     private captureButton!: HTMLButtonElement;
     private toast!: HTMLDivElement;
 
     private speechRecognition: SpeechRecognitionLike | null = null;
     private currentPrompt = "";
+    private currentWorldPrompt = "";
     private captureEnabled = false;
+    private isBusy = false;
 
     private readonly onSurfaceChange = (event: Event) => {
         const customEvent = event as CustomEvent<{ surfaceDetected: boolean; placementConfirmed: boolean }>;
@@ -53,6 +62,7 @@ export class HUD extends Behaviour {
         this.bindEvents();
         this.setupSpeechRecognition();
         this.applySurfaceBadgeState(ARPlacement.surfaceDetected, ARPlacement.placementConfirmed);
+        this.updateARButton();
         this.updateActionState();
     }
 
@@ -62,24 +72,37 @@ export class HUD extends Behaviour {
         this.speechRecognition?.abort();
     }
 
+    onEnterXR(): void {
+        this.updateARButton();
+    }
+
+    onLeaveXR(): void {
+        this.updateARButton();
+    }
+
     private injectMarkup(): void {
         const root = document.createElement("div");
         root.id = "barbie-hud";
         root.dataset.barbieOverlay = "true";
         root.innerHTML = `
             <div id="hud-top">
-                <div id="surface-badge">● SCANNING</div>
+                <div id="surface-badge">SCANNING</div>
                 <div id="top-actions">
                     <button id="ar-btn" type="button">START AR</button>
                     <button id="gallery-btn" type="button">GALLERY</button>
                 </div>
             </div>
             <div id="hud-bottom">
+                <button id="magic-btn" type="button">MAKE FOR ME</button>
                 <div id="prompt-row">
                     <input id="prompt-input" type="text" placeholder="Describe your Barbie..." autocomplete="off" />
                     <button id="speak-btn" type="button" aria-label="Hold to speak">HOLD</button>
                 </div>
-                <button id="add-btn" type="button" disabled>✦ ADD TO SCENE</button>
+                <input id="world-input" type="text" placeholder="Describe the Barbie world..." autocomplete="off" />
+                <div id="action-row">
+                    <button id="add-btn" type="button" disabled>ADD TO SCENE</button>
+                    <button id="world-btn" type="button" disabled>BUILD WORLD</button>
+                </div>
                 <button id="capture-btn" type="button" disabled>CAPTURE</button>
             </div>
             <div id="status-toast" hidden></div>
@@ -90,9 +113,12 @@ export class HUD extends Behaviour {
         this.surfaceBadge = root.querySelector("#surface-badge") as HTMLDivElement;
         this.arButton = root.querySelector("#ar-btn") as HTMLButtonElement;
         this.galleryButton = root.querySelector("#gallery-btn") as HTMLButtonElement;
+        this.magicButton = root.querySelector("#magic-btn") as HTMLButtonElement;
         this.promptInput = root.querySelector("#prompt-input") as HTMLInputElement;
+        this.worldInput = root.querySelector("#world-input") as HTMLInputElement;
         this.speakButton = root.querySelector("#speak-btn") as HTMLButtonElement;
         this.addButton = root.querySelector("#add-btn") as HTMLButtonElement;
+        this.buildWorldButton = root.querySelector("#world-btn") as HTMLButtonElement;
         this.captureButton = root.querySelector("#capture-btn") as HTMLButtonElement;
         this.toast = root.querySelector("#status-toast") as HTMLDivElement;
     }
@@ -105,8 +131,17 @@ export class HUD extends Behaviour {
             this.updateActionState();
         });
 
+        this.worldInput.addEventListener("input", () => {
+            this.currentWorldPrompt = this.worldInput.value.trim();
+            this.updateActionState();
+        });
+
         this.galleryButton.addEventListener("click", () => {
             ScrapbookUI.toggle();
+        });
+
+        this.magicButton.addEventListener("click", () => {
+            void this.handleMagicPrompts();
         });
 
         this.arButton.addEventListener("click", () => {
@@ -115,6 +150,10 @@ export class HUD extends Behaviour {
 
         this.addButton.addEventListener("click", () => {
             void this.handleAddToScene();
+        });
+
+        this.buildWorldButton.addEventListener("click", () => {
+            void this.handleBuildWorld();
         });
 
         this.captureButton.addEventListener("click", () => {
@@ -173,7 +212,31 @@ export class HUD extends Behaviour {
         this.speechRecognition = recognition;
     }
 
+    private async handleMagicPrompts(): Promise<void> {
+        if (this.isBusy) return;
+
+        this.isBusy = true;
+        this.updateActionState();
+
+        try {
+            this.showToast("Dreaming up Barbie ideas...");
+            const pack = await generateBarbiePromptPack(this.promptInput.value.trim() || this.worldInput.value.trim());
+            this.promptInput.value = pack.characterPrompt;
+            this.worldInput.value = pack.worldPrompt;
+            this.currentPrompt = pack.characterPrompt;
+            this.currentWorldPrompt = pack.worldPrompt;
+            this.showToast("Prompt pair ready");
+            window.setTimeout(() => this.hideToast(), 1400);
+        }
+        finally {
+            this.isBusy = false;
+            this.updateActionState();
+        }
+    }
+
     private async handleAddToScene(): Promise<void> {
+        if (this.isBusy) return;
+
         const prompt = this.promptInput.value.trim();
         if (!prompt) return;
 
@@ -183,24 +246,88 @@ export class HUD extends Behaviour {
             return;
         }
 
+        this.isBusy = true;
+        this.updateActionState();
+
         try {
-            this.showToast("Generating character...");
-            const glbUrl = await generateCharacter(prompt, (status) => this.showToast(status));
+            this.showToast("Designing Barbie...");
+            const imagePrompt = await generateRodinImagePrompt(prompt);
+            const referenceImage = await generateReferenceImage(imagePrompt, (status) => this.showToast(status));
+            const glbUrl = await generateCharacterFromImage(referenceImage, imagePrompt, (status) => this.showToast(status));
 
             if (!CharacterSpawner.instance) {
                 throw new Error("Character spawner is not ready.");
             }
 
             await CharacterSpawner.instance.spawnAt(glbUrl, ARPlacement.lastHitPosition.clone());
+
             this.currentPrompt = prompt;
+            this.currentWorldPrompt = this.worldInput.value.trim();
             this.captureEnabled = true;
-            this.updateActionState();
-            this.hideToast();
+            this.showToast("Barbie arrived");
+            window.setTimeout(() => this.hideToast(), 1200);
         }
         catch (error) {
-            const isTimeout = error instanceof RodinClientError && error.type === RodinError.Timeout;
-            this.showToast(isTimeout ? "Generation timed out, try again" : "Generation failed, try again");
-            window.setTimeout(() => this.hideToast(), 2000);
+            const timedOut =
+                (error instanceof RodinClientError && error.type === RodinError.Timeout) ||
+                (error instanceof WorldLabsClientError && error.type === WorldLabsError.Timeout);
+            const apiError =
+                error instanceof RodinClientError ||
+                error instanceof NanoBananaClientError ||
+                error instanceof WorldLabsClientError;
+
+            this.showToast(timedOut
+                ? "Generation timed out, try again"
+                : apiError
+                    ? "Character generation failed"
+                    : "Generation failed, try again");
+            window.setTimeout(() => this.hideToast(), 2200);
+        }
+        finally {
+            this.isBusy = false;
+            this.updateActionState();
+        }
+    }
+
+    private async handleBuildWorld(): Promise<void> {
+        if (this.isBusy) return;
+
+        const prompt = this.worldInput.value.trim();
+        if (!prompt) return;
+
+        if (!ARPlacement.placementConfirmed) {
+            this.showToast("Tap a surface to place first");
+            window.setTimeout(() => this.hideToast(), 1600);
+            return;
+        }
+
+        this.isBusy = true;
+        this.updateActionState();
+
+        try {
+            this.showToast("Dreaming world...");
+            const world = await generateWorld(prompt, (status) => this.showToast(status));
+            if (!WorldSpawner.instance) {
+                throw new Error("World spawner is not ready.");
+            }
+
+            const placement = SceneRig.instance?.hasContent()
+                ? SceneRig.instance.root.position.clone()
+                : ARPlacement.lastHitPosition.clone();
+
+            await WorldSpawner.instance.spawnAt(world, placement);
+            this.currentWorldPrompt = prompt;
+            this.showToast("World ready");
+            window.setTimeout(() => this.hideToast(), 1400);
+        }
+        catch (error) {
+            const timedOut = error instanceof WorldLabsClientError && error.type === WorldLabsError.Timeout;
+            this.showToast(timedOut ? "World timed out, try again" : "World generation failed");
+            window.setTimeout(() => this.hideToast(), 2200);
+        }
+        finally {
+            this.isBusy = false;
+            this.updateActionState();
         }
     }
 
@@ -256,7 +383,7 @@ export class HUD extends Behaviour {
     }
 
     private async handleCapture(): Promise<void> {
-        if (!this.captureEnabled || !this.currentPrompt) return;
+        if (this.isBusy || !this.captureEnabled || !this.currentPrompt) return;
 
         const canvas = document.querySelector("canvas") as HTMLCanvasElement | null;
         if (!canvas) {
@@ -265,12 +392,33 @@ export class HUD extends Behaviour {
             return;
         }
 
+        this.isBusy = true;
+        this.updateActionState();
+
         try {
-            const dataUrl = canvas.toDataURL("image/jpeg", 0.85);
-            const base64 = dataUrl.replace(/^data:image\/jpeg;base64,/, "");
+            const capturedDataUrl = canvas.toDataURL("image/jpeg", 0.85);
+            let polishedDataUrl = capturedDataUrl;
+
+            try {
+                polishedDataUrl = await polishCaptureImage(
+                    capturedDataUrl,
+                    this.currentPrompt,
+                    this.currentWorldPrompt,
+                    (status) => this.showToast(status)
+                );
+            }
+            catch (error) {
+                if (error instanceof NanoBananaClientError && error.type === NanoBananaError.InvalidResponse) {
+                    polishedDataUrl = capturedDataUrl;
+                }
+                else {
+                    polishedDataUrl = capturedDataUrl;
+                }
+            }
 
             this.showToast("Writing caption...");
             const caption = await generateCaption(this.currentPrompt);
+            const base64 = polishedDataUrl.replace(/^data:image\/[a-zA-Z0-9.+-]+;base64,/, "");
 
             await savePage({
                 id: crypto.randomUUID(),
@@ -280,18 +428,17 @@ export class HUD extends Behaviour {
                 timestamp: Date.now(),
             });
 
-            this.showToast("Saved to your book ✨");
+            this.showToast("Saved to your book");
             window.setTimeout(() => this.hideToast(), 2000);
         }
         catch {
             this.showToast("Capture failed, try again");
             window.setTimeout(() => this.hideToast(), 2000);
         }
-    }
-
-    private updateSurfaceBadge(surfaceDetected: boolean): void {
-        this.surfaceBadge.textContent = surfaceDetected ? "✓ SURFACE" : "● SCANNING";
-        this.surfaceBadge.classList.toggle("is-ready", surfaceDetected);
+        finally {
+            this.isBusy = false;
+            this.updateActionState();
+        }
     }
 
     private applySurfaceBadgeState(surfaceDetected: boolean, placementConfirmed: boolean): void {
@@ -308,16 +455,10 @@ export class HUD extends Behaviour {
     }
 
     private updateActionState(): void {
-        this.addButton.disabled = this.promptInput.value.trim().length === 0;
-        this.captureButton.disabled = !this.captureEnabled;
-    }
-
-    onEnterXR(): void {
-        this.updateARButton();
-    }
-
-    onLeaveXR(): void {
-        this.updateARButton();
+        this.magicButton.disabled = this.isBusy;
+        this.addButton.disabled = this.isBusy || this.promptInput.value.trim().length === 0;
+        this.buildWorldButton.disabled = this.isBusy || this.worldInput.value.trim().length === 0;
+        this.captureButton.disabled = this.isBusy || !this.captureEnabled;
     }
 
     private updateARButton(): void {
@@ -377,8 +518,9 @@ export class HUD extends Behaviour {
 
             #surface-badge,
             #ar-btn,
-            #gallery-btn {
-                padding: 8px 16px;
+            #gallery-btn,
+            #magic-btn {
+                padding: 10px 16px;
             }
 
             #surface-badge {
@@ -440,13 +582,22 @@ export class HUD extends Behaviour {
                 backdrop-filter: blur(12px);
             }
 
-            #prompt-row {
+            #magic-btn {
+                border: 1px solid rgba(255,214,231,0.4);
+                background: linear-gradient(135deg, rgba(255,214,231,0.18), rgba(255,36,114,0.22));
+                color: #fff1f7;
+                letter-spacing: 1px;
+            }
+
+            #prompt-row,
+            #action-row {
                 display: flex;
                 gap: 10px;
             }
 
-            #prompt-input {
-                flex: 1;
+            #prompt-input,
+            #world-input {
+                width: 100%;
                 border: 1px solid rgba(255,255,255,0.15);
                 background: rgba(255,255,255,0.08);
                 color: white;
@@ -455,7 +606,12 @@ export class HUD extends Behaviour {
                 min-width: 0;
             }
 
-            #prompt-input::placeholder {
+            #prompt-input {
+                flex: 1;
+            }
+
+            #prompt-input::placeholder,
+            #world-input::placeholder {
                 color: rgba(255,255,255,0.45);
             }
 
@@ -472,13 +628,16 @@ export class HUD extends Behaviour {
                 border-color: rgba(255,255,255,0.24);
             }
 
-            #add-btn {
+            #add-btn,
+            #world-btn {
+                flex: 1;
                 border: 1px solid rgba(255,36,114,0.4);
                 background: rgba(255,36,114,0.15);
                 color: #FFADD0;
             }
 
-            #add-btn:not(:disabled) {
+            #add-btn:not(:disabled),
+            #world-btn:not(:disabled) {
                 background: rgba(255,36,114,0.25);
             }
 
@@ -489,7 +648,9 @@ export class HUD extends Behaviour {
                 font-weight: 600;
             }
 
+            #magic-btn:disabled,
             #add-btn:disabled,
+            #world-btn:disabled,
             #capture-btn:disabled {
                 opacity: 0.4;
             }

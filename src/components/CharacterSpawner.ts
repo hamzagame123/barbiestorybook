@@ -1,5 +1,6 @@
 import { AssetReference, Behaviour, destroy } from "@needle-tools/engine";
 import * as THREE from "three";
+import { SceneRig } from "./SceneRig";
 
 const TARGET_SCALE = 0.2;
 const POP_DURATION_MS = 400;
@@ -23,6 +24,11 @@ export class CharacterSpawner extends Behaviour {
     async spawnAt(glbUrl: string, position: THREE.Vector3): Promise<void> {
         this.clearScene();
 
+        const rig = SceneRig.instance;
+        if (!rig) {
+            throw new Error("Scene rig is not ready.");
+        }
+
         const assetReference = AssetReference.getOrCreateFromUrl(glbUrl, this.context);
         await assetReference.preload();
         const instance = await assetReference.instantiate();
@@ -31,9 +37,10 @@ export class CharacterSpawner extends Behaviour {
             throw new Error("Failed to load generated character.");
         }
 
-        instance.position.copy(position);
+        rig.placeAt(position, true);
+        instance.position.set(0, 0, 0);
         instance.scale.setScalar(0);
-        this.context.scene.add(instance);
+        rig.root.add(instance);
         this.spawnedObject = instance;
 
         const startedAt = performance.now();

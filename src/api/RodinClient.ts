@@ -1,8 +1,9 @@
 import { FAL_API_KEY } from "../secrets";
 
 const RODIN_QUEUE_URL = "https://queue.fal.run/fal-ai/hyper3d/rodin";
+const RODIN_V2_QUEUE_URL = "https://queue.fal.run/fal-ai/hyper3d/rodin/v2";
 const POLL_INTERVAL_MS = 2500;
-const TIMEOUT_MS = 180_000;
+const TIMEOUT_MS = 240_000;
 
 export enum RodinError {
     Timeout = "timeout",
@@ -94,20 +95,16 @@ function inferProgressMessage(status: QueueStatusResponse, elapsedMs: number): s
     return "Generating character... (sculpting)";
 }
 
-export async function generateCharacter(
-    prompt: string,
+async function submitAndPollRodin(
+    submitUrl: string,
+    body: Record<string, unknown>,
     onProgress?: (status: string) => void
 ): Promise<string> {
     try {
-        const submitResponse = await fetch(RODIN_QUEUE_URL, {
+        const submitResponse = await fetch(submitUrl, {
             method: "POST",
             headers: getAuthHeaders(),
-            body: JSON.stringify({
-                prompt,
-                geometry_file_format: "glb",
-                material: "PBR",
-                quality: "medium",
-            }),
+            body: JSON.stringify(body),
         });
 
         const submitData = await readJson<QueueSubmitResponse>(submitResponse, RodinError.APIError);
@@ -163,10 +160,44 @@ export async function generateCharacter(
             await sleep(POLL_INTERVAL_MS);
         }
 
-        throw new RodinClientError(RodinError.Timeout, "Rodin generation timed out after 180 seconds.");
+        throw new RodinClientError(RodinError.Timeout, "Rodin generation timed out after 240 seconds.");
     }
     catch (error) {
         if (error instanceof RodinClientError) throw error;
         throw new RodinClientError(RodinError.APIError, error instanceof Error ? error.message : "Rodin generation failed.");
     }
+}
+
+export async function generateCharacter(
+    prompt: string,
+    onProgress?: (status: string) => void
+): Promise<string> {
+    return submitAndPollRodin(
+        RODIN_QUEUE_URL,
+        {
+            prompt,
+            geometry_file_format: "glb",
+            material: "PBR",
+            quality: "medium",
+        },
+        onProgress
+    );
+}
+
+export async function generateCharacterFromImage(
+    imageUrl: string,
+    prompt: string,
+    onProgress?: (status: string) => void
+): Promise<string> {
+    return submitAndPollRodin(
+        RODIN_V2_QUEUE_URL,
+        {
+            prompt,
+            input_image_urls: [imageUrl],
+            geometry_file_format: "glb",
+            material: "PBR",
+            quality_mesh_option: "500K Triangle",
+        },
+        onProgress
+    );
 }

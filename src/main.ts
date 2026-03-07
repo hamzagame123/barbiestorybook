@@ -5,6 +5,9 @@ import { ARPlacement } from "./components/ARPlacement";
 import { CharacterSpawner } from "./components/CharacterSpawner";
 import { HUD } from "./components/HUD";
 import { ScrapbookUI } from "./components/ScrapbookUI";
+import { SceneGestures } from "./components/SceneGestures";
+import { SceneRig } from "./components/SceneRig";
+import { WorldSpawner } from "./components/WorldSpawner";
 import * as ScrapbookStore from "./store/ScrapbookStore";
 
 void ScrapbookStore.init().catch((error) => {
@@ -35,7 +38,10 @@ onStart((context) => {
     });
 
     addComponent(context.scene, ARPlacement);
+    addComponent(context.scene, SceneRig);
+    addComponent(context.scene, SceneGestures);
     addComponent(context.scene, CharacterSpawner);
+    addComponent(context.scene, WorldSpawner);
     addComponent(context.scene, ScrapbookUI);
     addComponent(context.scene, HUD);
 });
