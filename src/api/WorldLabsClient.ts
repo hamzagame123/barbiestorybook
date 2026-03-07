@@ -6,9 +6,10 @@ const TIMEOUT_MS = 7 * 60_000;
 
 export type MarbleWorldAssets = {
     caption: string;
-    thumbnailUrl: string;
-    panoUrl: string;
-    colliderMeshUrl: string;
+    thumbnailUrl?: string;
+    panoUrl?: string;
+    colliderMeshUrl?: string;
+    spzUrl?: string;
     marbleUrl: string;
     worldId: string;
 };
@@ -37,7 +38,10 @@ type OperationResponse = {
     } | null;
     metadata?: {
         world_id?: string;
-        progress?: number;
+        progress?: number | {
+            status?: string;
+            description?: string;
+        };
         message?: string;
         status_message?: string;
     } | null;
@@ -56,6 +60,13 @@ type WorldResponse = {
         };
         mesh?: {
             collider_mesh_url?: string;
+        };
+        splats?: {
+            spz_urls?: {
+                ["500k"]?: string;
+                ["100k"]?: string;
+                full_res?: string;
+            };
         };
     };
 };
@@ -86,9 +97,14 @@ function normalizeWorld(world: WorldResponse | null | undefined): MarbleWorldAss
     const worldId = world?.world_id ?? world?.id;
     const colliderMeshUrl = world?.assets?.mesh?.collider_mesh_url;
     const panoUrl = world?.assets?.imagery?.pano_url;
+    const thumbnailUrl = world?.assets?.thumbnail_url;
+    const spzUrl =
+        world?.assets?.splats?.spz_urls?.["500k"] ??
+        world?.assets?.splats?.spz_urls?.["100k"] ??
+        world?.assets?.splats?.spz_urls?.full_res;
     const marbleUrl = world?.world_marble_url;
 
-    if (!worldId || !colliderMeshUrl || !panoUrl || !marbleUrl) {
+    if (!worldId || !marbleUrl) {
         throw new WorldLabsClientError(WorldLabsError.InvalidResponse, "World Labs finished, but the world assets were incomplete.");
     }
 
@@ -97,8 +113,9 @@ function normalizeWorld(world: WorldResponse | null | undefined): MarbleWorldAss
         marbleUrl,
         colliderMeshUrl,
         panoUrl,
+        spzUrl,
         caption: world?.assets?.caption ?? "",
-        thumbnailUrl: world?.assets?.thumbnail_url ?? "",
+        thumbnailUrl,
     };
 }
 
@@ -120,7 +137,10 @@ function getProgressMessage(operation: OperationResponse): string {
         return `Building world... ${numericProgress}%`;
     }
 
-    const metadataMessage = operation.metadata?.status_message ?? operation.metadata?.message;
+    const metadataMessage =
+        (typeof operation.metadata?.progress === "object" ? operation.metadata.progress.description : null) ??
+        operation.metadata?.status_message ??
+        operation.metadata?.message;
     if (metadataMessage) {
         return `Building world... ${metadataMessage}`;
     }
