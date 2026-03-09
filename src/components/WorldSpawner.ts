@@ -2,14 +2,27 @@ import { AssetReference, Behaviour, destroy } from "@needle-tools/engine";
 import * as THREE from "three";
 import type { MarbleWorldAssets } from "../api/WorldLabsClient";
 import { SceneRig } from "./SceneRig";
+import { WorldSplatRenderer, type LoadedWorldSplat } from "./WorldSplatRenderer";
 
 const TARGET_WORLD_SIZE = 1.4;
 const BACKDROP_BASE_HEIGHT = 0.82;
+
+export enum WorldSpawnerErrorType {
+    DisplayError = "display-error",
+}
+
+export class WorldSpawnerError extends Error {
+    constructor(public readonly type: WorldSpawnerErrorType, message: string) {
+        super(message);
+        this.name = "WorldSpawnerError";
+    }
+}
 
 export class WorldSpawner extends Behaviour {
     static instance: WorldSpawner | null = null;
 
     spawnedWorld: THREE.Object3D | null = null;
+    private spawnedWorldCleanup: (() => Promise<void>) | null = null;
     private readonly textureLoader = new THREE.TextureLoader();
 
     awake(): void {
@@ -20,12 +33,12 @@ export class WorldSpawner extends Behaviour {
         if (WorldSpawner.instance === this) {
             WorldSpawner.instance = null;
         }
-        this.clearScene();
+        void this.clearScene();
         this.context.domElement.removeAttribute("environment-image");
     }
 
     async spawnAt(world: MarbleWorldAssets, position: THREE.Vector3): Promise<void> {
-        this.clearScene();
+        await this.clearScene();
 
         const rig = SceneRig.instance;
         if (!rig) {
@@ -34,42 +47,40 @@ export class WorldSpawner extends Behaviour {
 
         rig.placeAt(position, false);
 
-        if (world.colliderMeshUrl) {
-            const assetReference = AssetReference.getOrCreateFromUrl(world.colliderMeshUrl, this.context);
-            await assetReference.preload();
-            const instance = await assetReference.instantiate();
-            if (!instance) {
-                throw new Error("Failed to load generated world.");
-            }
+        const visual = await this.createVisual(world);
+        if (!visual) {
+            throw new WorldSpawnerError(WorldSpawnerErrorType.DisplayError, "World generation finished, but no visual assets were available.");
+        }
 
-            rig.root.add(instance);
-            this.fitIntoRig(instance);
-            this.spawnedWorld = instance;
+        rig.root.add(visual.object);
+        if (visual.fit !== false) {
+            this.fitIntoRig(visual.object, visual.bounds);
         }
-        else if (world.thumbnailUrl || world.panoUrl) {
-            this.spawnedWorld = await this.createBackdrop(world);
-            rig.root.add(this.spawnedWorld);
-        }
-        else {
-            throw new Error("World generation finished, but no visual assets were available.");
-        }
+        this.spawnedWorld = visual.object;
+        this.spawnedWorldCleanup = visual.cleanup;
 
         if (world.panoUrl) {
             this.context.domElement.setAttribute("environment-image", world.panoUrl);
         }
     }
 
-    clearScene(): void {
-        if (this.spawnedWorld) {
-            destroy(this.spawnedWorld);
-            this.spawnedWorld = null;
+    async clearScene(): Promise<void> {
+        if (this.spawnedWorldCleanup) {
+            await this.spawnedWorldCleanup().catch((error) => {
+                console.warn("[WorldSpawner] Failed to clean up previous world.", error);
+            });
+            this.spawnedWorldCleanup = null;
         }
+        else if (this.spawnedWorld) {
+            destroy(this.spawnedWorld);
+        }
+
+        this.spawnedWorld = null;
         this.context.domElement.removeAttribute("environment-image");
     }
 
-    private fitIntoRig(instance: THREE.Object3D): void {
-        instance.updateMatrixWorld(true);
-        const initialBox = new THREE.Box3().setFromObject(instance);
+    private fitIntoRig(instance: THREE.Object3D, sourceBounds?: THREE.Box3): void {
+        const initialBox = sourceBounds?.clone() ?? new THREE.Box3().setFromObject(instance);
         if (initialBox.isEmpty()) return;
 
         const initialSize = initialBox.getSize(new THREE.Vector3());
@@ -79,10 +90,65 @@ export class WorldSpawner extends Behaviour {
             instance.scale.multiplyScalar(scale);
         }
 
-        instance.updateMatrixWorld(true);
-        const fittedBox = new THREE.Box3().setFromObject(instance);
+        instance.updateMatrix();
+        const fittedBox = sourceBounds?.clone().applyMatrix4(instance.matrix) ?? new THREE.Box3().setFromObject(instance);
         const center = fittedBox.getCenter(new THREE.Vector3());
         instance.position.set(-center.x, -fittedBox.min.y, -center.z);
+    }
+
+    private async createVisual(world: MarbleWorldAssets): Promise<LoadedWorldSplat | null> {
+        let splatError: unknown = null;
+
+        if (world.spzUrl && WorldSplatRenderer.instance) {
+            try {
+                return await WorldSplatRenderer.instance.createWorld(world);
+            }
+            catch (error) {
+                splatError = error;
+                console.warn("[WorldSpawner] Failed to display SPZ world, falling back to other assets.", error);
+            }
+        }
+
+        if (world.colliderMeshUrl) {
+            const assetReference = AssetReference.getOrCreateFromUrl(world.colliderMeshUrl, this.context);
+            await assetReference.preload();
+            const instance = await assetReference.instantiate();
+            if (!instance) {
+                throw new WorldSpawnerError(WorldSpawnerErrorType.DisplayError, "Failed to load the generated world mesh.");
+            }
+
+            return {
+                object: instance,
+                cleanup: async () => {
+                    destroy(instance);
+                },
+                fit: true,
+                renderer: "gaussian",
+            };
+        }
+
+        if (world.thumbnailUrl || world.panoUrl) {
+            const backdrop = await this.createBackdrop(world);
+            return {
+                object: backdrop,
+                cleanup: async () => {
+                    destroy(backdrop);
+                },
+                fit: false,
+                renderer: "gaussian",
+            };
+        }
+
+        if (splatError) {
+            throw new WorldSpawnerError(
+                WorldSpawnerErrorType.DisplayError,
+                splatError instanceof Error
+                    ? splatError.message
+                    : "World generation succeeded, but the gaussian splat could not be displayed."
+            );
+        }
+
+        return null;
     }
 
     private async createBackdrop(world: MarbleWorldAssets): Promise<THREE.Object3D> {

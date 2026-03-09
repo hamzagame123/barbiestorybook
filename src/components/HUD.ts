@@ -8,7 +8,7 @@ import { ARPlacement } from "./ARPlacement";
 import { CharacterSpawner } from "./CharacterSpawner";
 import { SceneRig } from "./SceneRig";
 import { ScrapbookUI } from "./ScrapbookUI";
-import { WorldSpawner } from "./WorldSpawner";
+import { WorldSpawner, WorldSpawnerError, WorldSpawnerErrorType } from "./WorldSpawner";
 
 type SpeechRecognitionLike = EventTarget & {
     continuous: boolean;
@@ -322,7 +322,14 @@ export class HUD extends Behaviour {
         }
         catch (error) {
             const timedOut = error instanceof WorldLabsClientError && error.type === WorldLabsError.Timeout;
-            this.showToast(timedOut ? "World timed out, try again" : "World generation failed");
+            const displayFailed = error instanceof WorldSpawnerError && error.type === WorldSpawnerErrorType.DisplayError;
+            this.showToast(
+                timedOut
+                    ? "World timed out, try again"
+                    : displayFailed
+                        ? "World built, but failed to display"
+                        : "World generation failed"
+            );
             window.setTimeout(() => this.hideToast(), 2200);
         }
         finally {

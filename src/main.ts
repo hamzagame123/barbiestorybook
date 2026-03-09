@@ -7,6 +7,7 @@ import { HUD } from "./components/HUD";
 import { ScrapbookUI } from "./components/ScrapbookUI";
 import { SceneGestures } from "./components/SceneGestures";
 import { SceneRig } from "./components/SceneRig";
+import { WorldSplatRenderer } from "./components/WorldSplatRenderer";
 import { WorldSpawner } from "./components/WorldSpawner";
 import * as ScrapbookStore from "./store/ScrapbookStore";
 
@@ -41,6 +42,7 @@ onStart((context) => {
     addComponent(context.scene, SceneRig);
     addComponent(context.scene, SceneGestures);
     addComponent(context.scene, CharacterSpawner);
+    addComponent(context.scene, WorldSplatRenderer);
     addComponent(context.scene, WorldSpawner);
     addComponent(context.scene, ScrapbookUI);
     addComponent(context.scene, HUD);

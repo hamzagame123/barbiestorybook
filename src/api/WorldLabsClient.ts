@@ -10,6 +10,7 @@ export type MarbleWorldAssets = {
     panoUrl?: string;
     colliderMeshUrl?: string;
     spzUrl?: string;
+    spzVariant?: "500k" | "100k";
     marbleUrl: string;
     worldId: string;
 };
@@ -98,14 +99,21 @@ function normalizeWorld(world: WorldResponse | null | undefined): MarbleWorldAss
     const colliderMeshUrl = world?.assets?.mesh?.collider_mesh_url;
     const panoUrl = world?.assets?.imagery?.pano_url;
     const thumbnailUrl = world?.assets?.thumbnail_url;
-    const spzUrl =
-        world?.assets?.splats?.spz_urls?.["500k"] ??
-        world?.assets?.splats?.spz_urls?.["100k"] ??
-        world?.assets?.splats?.spz_urls?.full_res;
+    const spz500k = world?.assets?.splats?.spz_urls?.["500k"];
+    const spz100k = world?.assets?.splats?.spz_urls?.["100k"];
+    const spzUrl = spz500k ?? spz100k;
+    const spzVariant = spz500k ? "500k" : spz100k ? "100k" : undefined;
     const marbleUrl = world?.world_marble_url;
 
     if (!worldId || !marbleUrl) {
         throw new WorldLabsClientError(WorldLabsError.InvalidResponse, "World Labs finished, but the world assets were incomplete.");
+    }
+
+    if (spzVariant) {
+        console.info(`[WorldLabsClient] Selected ${spzVariant} SPZ asset for world ${worldId}.`);
+    }
+    else if (world?.assets?.splats?.spz_urls?.full_res) {
+        console.info(`[WorldLabsClient] Ignoring full_res SPZ for world ${worldId} to keep AR rendering stable.`);
     }
 
     return {
@@ -114,6 +122,7 @@ function normalizeWorld(world: WorldResponse | null | undefined): MarbleWorldAss
         colliderMeshUrl,
         panoUrl,
         spzUrl,
+        spzVariant,
         caption: world?.assets?.caption ?? "",
         thumbnailUrl,
     };

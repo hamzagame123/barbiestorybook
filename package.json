@@ -10,7 +10,10 @@
     "deploy": "npm run build && npx --yes needle-cloud deploy ./dist --name barbie-storybook --token %NEEDLE_CLOUD_TOKEN%"
   },
   "dependencies": {
+    "@mkkellogg/gaussian-splats-3d": "^0.4.7",
     "@needle-tools/engine": "^4.15.0",
+    "@sparkjsdev/spark": "^0.1.10",
+    "spz-js": "^1.2.5",
     "three": "npm:@needle-tools/three@^0.169.15"
   },
   "devDependencies": {
