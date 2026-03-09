@@ -7,7 +7,7 @@
     "build": "vite build -- --production",
     "build:production": "npm run build",
     "build:dev": "vite build",
-    "deploy": "npm run build && npx --yes needle-cloud deploy ./dist --name barbie-storybook --token %NEEDLE_CLOUD_TOKEN%"
+    "deploy": "npm run build && npx --yes needle-cloud deploy ./dist --name barbie-storybook"
   },
   "dependencies": {
     "@mkkellogg/gaussian-splats-3d": "^0.4.7",

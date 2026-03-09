@@ -10,7 +10,11 @@ export default defineConfig(async ({ command }) => {
         plugins: [
             mkcert(),
             useGzip(needleConfig) ? viteCompression({ deleteOriginFile: true }) : null,
-            needlePlugins(command, needleConfig, { noPoster: true, allowHotReload: false }),
+            needlePlugins(command, needleConfig, {
+                noPoster: true,
+                allowHotReload: false,
+                buildPipeline: { enabled: false },
+            }),
         ],
         server: {
             https: true,
