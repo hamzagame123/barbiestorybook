@@ -11,7 +11,7 @@ export type LoadedWorldSplat = {
     bounds?: THREE.Box3;
     fit?: boolean;
     cleanup: () => Promise<void>;
-    renderer: "spark" | "gaussian";
+    renderer: "spark" | "gaussian" | "pano";
 };
 
 type GaussianModule = typeof import("@mkkellogg/gaussian-splats-3d");

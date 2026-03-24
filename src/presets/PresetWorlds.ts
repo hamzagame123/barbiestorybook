@@ -19,7 +19,7 @@ export const PRESET_WORLDS: PresetWorld[] = [
             marbleUrl: "preset://dreamhouse",
             caption: "Barbie Dreamhouse",
             panoUrl: dreamhousePanoUrl,
-            thumbnailUrl: dreamhousePanoUrl,
+            panoMode: "skybox",
         },
     },
 ];

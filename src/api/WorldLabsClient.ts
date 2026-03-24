@@ -8,6 +8,7 @@ export type MarbleWorldAssets = {
     caption: string;
     thumbnailUrl?: string;
     panoUrl?: string;
+    panoMode?: "backdrop" | "skybox";
     colliderMeshUrl?: string;
     spzUrl?: string;
     spzVariant?: "500k" | "100k";

@@ -109,6 +109,10 @@ export class WorldSpawner extends Behaviour {
             }
         }
 
+        if (world.panoUrl && world.panoMode === "skybox") {
+            return await this.createSkybox(world.panoUrl);
+        }
+
         if (world.colliderMeshUrl) {
             const assetReference = AssetReference.getOrCreateFromUrl(world.colliderMeshUrl, this.context);
             await assetReference.preload();
@@ -149,6 +153,43 @@ export class WorldSpawner extends Behaviour {
         }
 
         return null;
+    }
+
+    private async createSkybox(panoUrl: string): Promise<LoadedWorldSplat> {
+        const rig = SceneRig.instance;
+        if (!rig) {
+            throw new Error("Scene rig is not ready.");
+        }
+
+        const texture = await this.textureLoader.loadAsync(panoUrl);
+        texture.colorSpace = THREE.SRGBColorSpace;
+
+        const geometry = new THREE.SphereGeometry(8, 64, 32);
+        geometry.scale(-1, 1, 1);
+
+        const material = new THREE.MeshBasicMaterial({
+            map: texture,
+            toneMapped: false,
+            depthWrite: false,
+        });
+
+        const skybox = new THREE.Mesh(geometry, material);
+        skybox.name = "Barbie Pano Skybox";
+
+        const cameraWorldPosition = this.context.mainCamera.getWorldPosition(new THREE.Vector3());
+        skybox.position.copy(rig.root.worldToLocal(cameraWorldPosition));
+
+        return {
+            object: skybox,
+            fit: false,
+            renderer: "pano",
+            cleanup: async () => {
+                skybox.removeFromParent();
+                geometry.dispose();
+                material.dispose();
+                texture.dispose();
+            },
+        };
     }
 
     private async createBackdrop(world: MarbleWorldAssets): Promise<THREE.Object3D> {
