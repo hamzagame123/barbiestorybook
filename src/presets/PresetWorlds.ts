@@ -1,0 +1,29 @@
+import type { MarbleWorldAssets } from "../api/WorldLabsClient";
+
+const dreamhousePanoUrl = new URL("../assets/worlds/barbie-dreamhouse-pano.png", import.meta.url).toString();
+
+export type PresetWorldId = "dreamhouse";
+
+export type PresetWorld = {
+    id: PresetWorldId;
+    label: string;
+    world: MarbleWorldAssets;
+};
+
+export const PRESET_WORLDS: PresetWorld[] = [
+    {
+        id: "dreamhouse",
+        label: "DREAMHOUSE",
+        world: {
+            worldId: "preset-dreamhouse",
+            marbleUrl: "preset://dreamhouse",
+            caption: "Barbie Dreamhouse",
+            panoUrl: dreamhousePanoUrl,
+            thumbnailUrl: dreamhousePanoUrl,
+        },
+    },
+];
+
+export function getPresetWorld(id: PresetWorldId): PresetWorld | undefined {
+    return PRESET_WORLDS.find((preset) => preset.id === id);
+}

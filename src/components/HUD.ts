@@ -4,6 +4,7 @@ import { generateReferenceImage, NanoBananaClientError, NanoBananaError, polishC
 import { generateCharacterFromImage, RodinClientError, RodinError } from "../api/RodinClient";
 import { generateWorld, WorldLabsClientError, WorldLabsError } from "../api/WorldLabsClient";
 import { savePage } from "../store/ScrapbookStore";
+import { PRESET_WORLDS, getPresetWorld, type PresetWorldId } from "../presets/PresetWorlds";
 import { ARPlacement } from "./ARPlacement";
 import { CharacterSpawner } from "./CharacterSpawner";
 import { SceneRig } from "./SceneRig";
@@ -39,6 +40,7 @@ export class HUD extends Behaviour {
     private magicButton!: HTMLButtonElement;
     private promptInput!: HTMLInputElement;
     private worldInput!: HTMLInputElement;
+    private presetWorldButtons: HTMLButtonElement[] = [];
     private speakButton!: HTMLButtonElement;
     private addButton!: HTMLButtonElement;
     private buildWorldButton!: HTMLButtonElement;
@@ -99,6 +101,12 @@ export class HUD extends Behaviour {
                     <button id="speak-btn" type="button" aria-label="Hold to speak">HOLD</button>
                 </div>
                 <input id="world-input" type="text" placeholder="Describe the Barbie world..." autocomplete="off" />
+                <div id="world-presets">
+                    <div id="world-presets-label">PRESET WORLDS</div>
+                    <div id="world-preset-row">
+                        ${PRESET_WORLDS.map((preset) => `<button class="world-preset-btn" data-world-preset="${preset.id}" type="button">${preset.label}</button>`).join("")}
+                    </div>
+                </div>
                 <div id="action-row">
                     <button id="add-btn" type="button" disabled>ADD TO SCENE</button>
                     <button id="world-btn" type="button" disabled>BUILD WORLD</button>
@@ -116,6 +124,7 @@ export class HUD extends Behaviour {
         this.magicButton = root.querySelector("#magic-btn") as HTMLButtonElement;
         this.promptInput = root.querySelector("#prompt-input") as HTMLInputElement;
         this.worldInput = root.querySelector("#world-input") as HTMLInputElement;
+        this.presetWorldButtons = Array.from(root.querySelectorAll(".world-preset-btn")) as HTMLButtonElement[];
         this.speakButton = root.querySelector("#speak-btn") as HTMLButtonElement;
         this.addButton = root.querySelector("#add-btn") as HTMLButtonElement;
         this.buildWorldButton = root.querySelector("#world-btn") as HTMLButtonElement;
@@ -154,6 +163,14 @@ export class HUD extends Behaviour {
 
         this.buildWorldButton.addEventListener("click", () => {
             void this.handleBuildWorld();
+        });
+
+        this.presetWorldButtons.forEach((button) => {
+            button.addEventListener("click", () => {
+                const presetId = button.dataset.worldPreset as PresetWorldId | undefined;
+                if (!presetId) return;
+                void this.handlePresetWorld(presetId);
+            });
         });
 
         this.captureButton.addEventListener("click", () => {
@@ -338,6 +355,51 @@ export class HUD extends Behaviour {
         }
     }
 
+    private async handlePresetWorld(presetId: PresetWorldId): Promise<void> {
+        if (this.isBusy) return;
+
+        const preset = getPresetWorld(presetId);
+        if (!preset) {
+            this.showToast("Preset world missing");
+            window.setTimeout(() => this.hideToast(), 1800);
+            return;
+        }
+
+        if (!ARPlacement.placementConfirmed) {
+            this.showToast("Tap a surface to place first");
+            window.setTimeout(() => this.hideToast(), 1600);
+            return;
+        }
+
+        this.isBusy = true;
+        this.updateActionState();
+
+        try {
+            this.showToast(`Loading ${preset.world.caption}...`);
+            if (!WorldSpawner.instance) {
+                throw new Error("World spawner is not ready.");
+            }
+
+            const placement = SceneRig.instance?.hasContent()
+                ? SceneRig.instance.root.position.clone()
+                : ARPlacement.lastHitPosition.clone();
+
+            await WorldSpawner.instance.spawnAt(preset.world, placement);
+            this.currentWorldPrompt = preset.world.caption;
+            this.worldInput.value = preset.world.caption;
+            this.showToast(`${preset.world.caption} ready`);
+            window.setTimeout(() => this.hideToast(), 1400);
+        }
+        catch {
+            this.showToast("Preset world failed to load");
+            window.setTimeout(() => this.hideToast(), 2200);
+        }
+        finally {
+            this.isBusy = false;
+            this.updateActionState();
+        }
+    }
+
     private handleStartAR(): void {
         if (NeedleXRSession.active?.isAR) {
             NeedleXRSession.stop();
@@ -465,6 +527,9 @@ export class HUD extends Behaviour {
         this.magicButton.disabled = this.isBusy;
         this.addButton.disabled = this.isBusy || this.promptInput.value.trim().length === 0;
         this.buildWorldButton.disabled = this.isBusy || this.worldInput.value.trim().length === 0;
+        this.presetWorldButtons.forEach((button) => {
+            button.disabled = this.isBusy;
+        });
         this.captureButton.disabled = this.isBusy || !this.captureEnabled;
     }
 
@@ -600,6 +665,33 @@ export class HUD extends Behaviour {
             #action-row {
                 display: flex;
                 gap: 10px;
+            }
+
+            #world-presets {
+                display: flex;
+                flex-direction: column;
+                gap: 8px;
+            }
+
+            #world-presets-label {
+                color: rgba(255,255,255,0.48);
+                font-size: 11px;
+                letter-spacing: 1.8px;
+            }
+
+            #world-preset-row {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 8px;
+            }
+
+            .world-preset-btn {
+                border: 1px solid rgba(255, 214, 231, 0.35);
+                background: rgba(255, 214, 231, 0.1);
+                color: #fff1f7;
+                padding: 10px 14px;
+                letter-spacing: 1px;
+                min-height: 40px;
             }
 
             #prompt-input,
