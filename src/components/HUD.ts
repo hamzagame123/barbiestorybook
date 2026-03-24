@@ -41,6 +41,8 @@ export class HUD extends Behaviour {
     private galleryButton!: HTMLButtonElement;
     private magicButton!: HTMLButtonElement;
     private promptInput!: HTMLInputElement;
+    private promptRow!: HTMLDivElement;
+    private actionRow!: HTMLDivElement;
     private worldInput!: HTMLInputElement;
     private panelToggleButton!: HTMLButtonElement;
     private rotateLeftButton!: HTMLButtonElement;
@@ -74,6 +76,7 @@ export class HUD extends Behaviour {
         this.applySurfaceBadgeState(ARPlacement.surfaceDetected, ARPlacement.placementConfirmed);
         this.updateARButton();
         this.setPanelExpanded(false);
+        this.updateHudMode();
         this.updateActionState();
     }
 
@@ -158,6 +161,8 @@ export class HUD extends Behaviour {
         this.galleryButton = root.querySelector("#gallery-btn") as HTMLButtonElement;
         this.magicButton = root.querySelector("#magic-btn") as HTMLButtonElement;
         this.promptInput = root.querySelector("#prompt-input") as HTMLInputElement;
+        this.promptRow = root.querySelector("#prompt-row") as HTMLDivElement;
+        this.actionRow = root.querySelector("#action-row") as HTMLDivElement;
         this.panelToggleButton = root.querySelector("#panel-toggle-btn") as HTMLButtonElement;
         this.rotateLeftButton = root.querySelector("#rotate-left-btn") as HTMLButtonElement;
         this.rotateRightButton = root.querySelector("#rotate-right-btn") as HTMLButtonElement;
@@ -346,6 +351,7 @@ export class HUD extends Behaviour {
             this.currentWorldPrompt = this.worldInput.value.trim();
             this.captureEnabled = true;
             this.setPanelExpanded(false);
+            this.updateHudMode();
             this.showToast("Barbie arrived");
             window.setTimeout(() => this.hideToast(), 1200);
         }
@@ -407,6 +413,7 @@ export class HUD extends Behaviour {
             this.promptInput.value = preset.prompt;
             this.captureEnabled = true;
             this.setPanelExpanded(false);
+            this.updateHudMode();
             this.showToast(`${preset.prompt} ready`);
             window.setTimeout(() => this.hideToast(), 1400);
         }
@@ -449,6 +456,7 @@ export class HUD extends Behaviour {
             await WorldSpawner.instance.spawnAt(world, placement);
             this.currentWorldPrompt = prompt;
             this.setPanelExpanded(false);
+            this.updateHudMode();
             this.showToast("World ready");
             window.setTimeout(() => this.hideToast(), 1400);
         }
@@ -503,6 +511,7 @@ export class HUD extends Behaviour {
             this.currentWorldPrompt = preset.world.caption;
             this.worldInput.value = preset.world.caption;
             this.setPanelExpanded(false);
+            this.updateHudMode();
             this.showToast(`${preset.world.caption} ready`);
             window.setTimeout(() => this.hideToast(), 1400);
         }
@@ -581,7 +590,7 @@ export class HUD extends Behaviour {
         this.updateActionState();
 
         try {
-            const capturedDataUrl = canvas.toDataURL("image/jpeg", 0.85);
+            const capturedDataUrl = canvas.toDataURL("image/png");
             let polishedDataUrl = capturedDataUrl;
 
             try {
@@ -653,6 +662,7 @@ export class HUD extends Behaviour {
             button.disabled = this.isBusy;
         });
         this.captureButton.disabled = this.isBusy || !this.captureEnabled;
+        this.updateHudMode();
     }
 
     private updateARButton(): void {
@@ -673,6 +683,19 @@ export class HUD extends Behaviour {
         this.bottomSheet.classList.toggle("is-expanded", expanded);
         this.panelToggleButton.textContent = expanded ? "LESS" : "MORE";
         this.panelToggleButton.setAttribute("aria-expanded", String(expanded));
+    }
+
+    private updateHudMode(): void {
+        const hasPlacedDoll = !!CharacterSpawner.instance?.spawnedObject;
+        const captureMode = this.captureEnabled && hasPlacedDoll;
+
+        this.promptRow.hidden = captureMode;
+        this.actionRow.classList.toggle("is-capture-mode", captureMode);
+        this.addButton.hidden = captureMode;
+        this.captureButton.hidden = !captureMode;
+        this.rotateLeftButton.hidden = !captureMode;
+        this.rotateRightButton.hidden = !captureMode;
+        this.bottomSheet.classList.toggle("is-capture-mode", captureMode);
     }
 
     private showToast(message: string): void {

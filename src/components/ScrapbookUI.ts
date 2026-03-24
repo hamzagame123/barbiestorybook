@@ -14,6 +14,9 @@ export class ScrapbookUI extends Behaviour {
     private overlay!: HTMLDivElement;
     private grid!: HTMLDivElement;
     private emptyState!: HTMLDivElement;
+    private viewer!: HTMLDivElement;
+    private viewerImage!: HTMLImageElement;
+    private viewerCaption!: HTMLDivElement;
 
     static toggle(): void {
         void ScrapbookUI.instance?.toggle();
@@ -58,6 +61,7 @@ export class ScrapbookUI extends Behaviour {
             const card = document.createElement("article");
             card.className = "page-card";
             card.style.transform = `rotate(${this.getRotationFromId(page.id)}deg)`;
+            card.addEventListener("click", () => this.openViewer(page));
 
             const tape = document.createElement("div");
             tape.className = "washi-tape";
@@ -66,6 +70,7 @@ export class ScrapbookUI extends Behaviour {
             const image = document.createElement("img");
             image.src = `data:image/jpeg;base64,${page.imageBase64}`;
             image.alt = page.caption;
+            image.loading = "lazy";
 
             const caption = document.createElement("div");
             caption.className = "card-caption";
@@ -78,6 +83,21 @@ export class ScrapbookUI extends Behaviour {
             card.append(tape, image, caption, world);
             this.grid.append(card);
         });
+    }
+
+    private openViewer(page: ScrapbookPage): void {
+        this.viewer.hidden = false;
+        this.viewerImage.src = `data:image/jpeg;base64,${page.imageBase64}`;
+        this.viewerImage.alt = page.caption;
+        this.viewerCaption.textContent = `${page.caption} • ${page.characterPrompt}`;
+        this.overlay.style.overflow = "hidden";
+    }
+
+    private closeViewer(): void {
+        this.viewer.hidden = true;
+        this.viewerImage.removeAttribute("src");
+        this.viewerCaption.textContent = "";
+        this.overlay.style.overflowY = "auto";
     }
 
     private getRotationFromId(id: string): number {
@@ -97,10 +117,15 @@ export class ScrapbookUI extends Behaviour {
         overlay.innerHTML = `
             <div id="scrapbook-header">
                 <span id="scrapbook-title">Barbie's Storybook</span>
-                <button id="scrapbook-close" type="button" aria-label="Close scrapbook">✕</button>
+                <button id="scrapbook-close" type="button" aria-label="Close scrapbook">X</button>
             </div>
             <div id="scrapbook-grid"></div>
             <div id="scrapbook-empty" hidden>Your story starts here ✨</div>
+            <div id="scrapbook-viewer" hidden>
+                <button id="scrapbook-viewer-close" type="button" aria-label="Close image preview">X</button>
+                <img id="scrapbook-viewer-image" alt="" />
+                <div id="scrapbook-viewer-caption"></div>
+            </div>
         `;
 
         this.getOverlayHost().append(overlay);
@@ -108,9 +133,19 @@ export class ScrapbookUI extends Behaviour {
         this.overlay = overlay;
         this.grid = overlay.querySelector("#scrapbook-grid") as HTMLDivElement;
         this.emptyState = overlay.querySelector("#scrapbook-empty") as HTMLDivElement;
+        this.viewer = overlay.querySelector("#scrapbook-viewer") as HTMLDivElement;
+        this.viewerImage = overlay.querySelector("#scrapbook-viewer-image") as HTMLImageElement;
+        this.viewerCaption = overlay.querySelector("#scrapbook-viewer-caption") as HTMLDivElement;
 
         const closeButton = overlay.querySelector("#scrapbook-close") as HTMLButtonElement;
         closeButton.addEventListener("click", () => void this.toggle());
+
+        const viewerCloseButton = overlay.querySelector("#scrapbook-viewer-close") as HTMLButtonElement;
+        viewerCloseButton.addEventListener("click", () => this.closeViewer());
+
+        this.viewer.addEventListener("click", (event) => {
+            if (event.target === this.viewer) this.closeViewer();
+        });
     }
 
     private getOverlayHost(): HTMLElement {
@@ -160,6 +195,7 @@ export class ScrapbookUI extends Behaviour {
                 padding: 20px 24px;
                 background: #FFF6F0;
                 border-bottom: 1px solid rgba(200,100,130,0.2);
+                z-index: 2;
             }
 
             #scrapbook-title {
@@ -195,22 +231,25 @@ export class ScrapbookUI extends Behaviour {
 
             .page-card {
                 background: white;
-                border-radius: 12px;
+                border-radius: 14px;
                 box-shadow: 0 4px 20px rgba(0,0,0,0.08);
                 overflow: hidden;
-                cursor: pointer;
+                cursor: zoom-in;
                 transition: transform 0.2s ease;
+                display: flex;
+                flex-direction: column;
             }
 
             .page-card img {
                 display: block;
                 width: 100%;
-                aspect-ratio: 4 / 3;
-                object-fit: cover;
+                aspect-ratio: 4 / 5;
+                object-fit: contain;
+                background: #FFF7F2;
             }
 
             .page-card .card-caption {
-                padding: 10px 12px;
+                padding: 10px 12px 4px;
                 font-size: 12px;
                 font-style: italic;
                 line-height: 1.5;
@@ -236,6 +275,50 @@ export class ScrapbookUI extends Behaviour {
                 border-radius: 2px;
                 opacity: 0.7;
                 transform: rotate(-2deg);
+            }
+
+            #scrapbook-viewer {
+                position: fixed;
+                inset: 0;
+                z-index: 1100;
+                background: rgba(255, 246, 240, 0.96);
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                gap: 16px;
+                padding: 24px;
+            }
+
+            #scrapbook-viewer-image {
+                width: min(92vw, 900px);
+                max-height: 72vh;
+                object-fit: contain;
+                background: #fffaf6;
+                border-radius: 18px;
+                box-shadow: 0 16px 50px rgba(0,0,0,0.12);
+            }
+
+            #scrapbook-viewer-caption {
+                width: min(92vw, 900px);
+                font-size: 16px;
+                line-height: 1.5;
+                color: #3a1a2a;
+                text-align: center;
+            }
+
+            #scrapbook-viewer-close {
+                position: absolute;
+                top: 16px;
+                right: 16px;
+                min-width: 44px;
+                min-height: 44px;
+                border: none;
+                background: rgba(200,24,90,0.08);
+                color: #C0185A;
+                border-radius: 999px;
+                font-size: 20px;
+                cursor: pointer;
             }
 
             @media (max-width: 480px) {
