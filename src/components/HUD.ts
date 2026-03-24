@@ -3,6 +3,7 @@ import { generateBarbiePromptPack, generateCaption, generateRodinImagePrompt } f
 import { generateReferenceImage, NanoBananaClientError, NanoBananaError, polishCaptureImage } from "../api/NanoBananaClient";
 import { generateCharacterFromImage, RodinClientError, RodinError } from "../api/RodinClient";
 import { generateWorld, WorldLabsClientError, WorldLabsError } from "../api/WorldLabsClient";
+import { PRESET_CHARACTERS, getPresetCharacter, type PresetCharacterId } from "../presets/PresetCharacters";
 import { savePage } from "../store/ScrapbookStore";
 import { PRESET_WORLDS, getPresetWorld, type PresetWorldId } from "../presets/PresetWorlds";
 import { ARPlacement } from "./ARPlacement";
@@ -40,6 +41,7 @@ export class HUD extends Behaviour {
     private magicButton!: HTMLButtonElement;
     private promptInput!: HTMLInputElement;
     private worldInput!: HTMLInputElement;
+    private presetCharacterButtons: HTMLButtonElement[] = [];
     private presetWorldButtons: HTMLButtonElement[] = [];
     private speakButton!: HTMLButtonElement;
     private addButton!: HTMLButtonElement;
@@ -100,6 +102,12 @@ export class HUD extends Behaviour {
                     <input id="prompt-input" type="text" placeholder="Describe your Barbie..." autocomplete="off" />
                     <button id="speak-btn" type="button" aria-label="Hold to speak">HOLD</button>
                 </div>
+                <div id="character-presets">
+                    <div id="character-presets-label">PRESET DOLLS</div>
+                    <div id="character-preset-row">
+                        ${PRESET_CHARACTERS.map((preset) => `<button class="character-preset-btn" data-character-preset="${preset.id}" type="button">${preset.label}</button>`).join("")}
+                    </div>
+                </div>
                 <input id="world-input" type="text" placeholder="Describe the Barbie world..." autocomplete="off" />
                 <div id="world-presets">
                     <div id="world-presets-label">PRESET WORLDS</div>
@@ -123,6 +131,7 @@ export class HUD extends Behaviour {
         this.galleryButton = root.querySelector("#gallery-btn") as HTMLButtonElement;
         this.magicButton = root.querySelector("#magic-btn") as HTMLButtonElement;
         this.promptInput = root.querySelector("#prompt-input") as HTMLInputElement;
+        this.presetCharacterButtons = Array.from(root.querySelectorAll(".character-preset-btn")) as HTMLButtonElement[];
         this.worldInput = root.querySelector("#world-input") as HTMLInputElement;
         this.presetWorldButtons = Array.from(root.querySelectorAll(".world-preset-btn")) as HTMLButtonElement[];
         this.speakButton = root.querySelector("#speak-btn") as HTMLButtonElement;
@@ -163,6 +172,14 @@ export class HUD extends Behaviour {
 
         this.buildWorldButton.addEventListener("click", () => {
             void this.handleBuildWorld();
+        });
+
+        this.presetCharacterButtons.forEach((button) => {
+            button.addEventListener("click", () => {
+                const presetId = button.dataset.characterPreset as PresetCharacterId | undefined;
+                if (!presetId) return;
+                void this.handlePresetCharacter(presetId);
+            });
         });
 
         this.presetWorldButtons.forEach((button) => {
@@ -276,7 +293,11 @@ export class HUD extends Behaviour {
                 throw new Error("Character spawner is not ready.");
             }
 
-            await CharacterSpawner.instance.spawnAt(glbUrl, ARPlacement.lastHitPosition.clone());
+            const placement = SceneRig.instance?.hasContent()
+                ? SceneRig.instance.root.position.clone()
+                : ARPlacement.lastHitPosition.clone();
+
+            await CharacterSpawner.instance.spawnAt(glbUrl, placement);
 
             this.currentPrompt = prompt;
             this.currentWorldPrompt = this.worldInput.value.trim();
@@ -298,6 +319,52 @@ export class HUD extends Behaviour {
                 : apiError
                     ? "Character generation failed"
                     : "Generation failed, try again");
+            window.setTimeout(() => this.hideToast(), 2200);
+        }
+        finally {
+            this.isBusy = false;
+            this.updateActionState();
+        }
+    }
+
+    private async handlePresetCharacter(presetId: PresetCharacterId): Promise<void> {
+        if (this.isBusy) return;
+
+        const preset = getPresetCharacter(presetId);
+        if (!preset) {
+            this.showToast("Preset doll missing");
+            window.setTimeout(() => this.hideToast(), 1800);
+            return;
+        }
+
+        if (!ARPlacement.placementConfirmed) {
+            this.showToast("Tap a surface to place first");
+            window.setTimeout(() => this.hideToast(), 1600);
+            return;
+        }
+
+        this.isBusy = true;
+        this.updateActionState();
+
+        try {
+            this.showToast(`Loading ${preset.prompt}...`);
+            if (!CharacterSpawner.instance) {
+                throw new Error("Character spawner is not ready.");
+            }
+
+            const placement = SceneRig.instance?.hasContent()
+                ? SceneRig.instance.root.position.clone()
+                : ARPlacement.lastHitPosition.clone();
+
+            await CharacterSpawner.instance.spawnAt(preset.glbUrl, placement);
+            this.currentPrompt = preset.prompt;
+            this.promptInput.value = preset.prompt;
+            this.captureEnabled = true;
+            this.showToast(`${preset.prompt} ready`);
+            window.setTimeout(() => this.hideToast(), 1400);
+        }
+        catch {
+            this.showToast("Preset doll failed to load");
             window.setTimeout(() => this.hideToast(), 2200);
         }
         finally {
@@ -527,6 +594,9 @@ export class HUD extends Behaviour {
         this.magicButton.disabled = this.isBusy;
         this.addButton.disabled = this.isBusy || this.promptInput.value.trim().length === 0;
         this.buildWorldButton.disabled = this.isBusy || this.worldInput.value.trim().length === 0;
+        this.presetCharacterButtons.forEach((button) => {
+            button.disabled = this.isBusy;
+        });
         this.presetWorldButtons.forEach((button) => {
             button.disabled = this.isBusy;
         });
@@ -667,24 +737,28 @@ export class HUD extends Behaviour {
                 gap: 10px;
             }
 
+            #character-presets,
             #world-presets {
                 display: flex;
                 flex-direction: column;
                 gap: 8px;
             }
 
+            #character-presets-label,
             #world-presets-label {
                 color: rgba(255,255,255,0.48);
                 font-size: 11px;
                 letter-spacing: 1.8px;
             }
 
+            #character-preset-row,
             #world-preset-row {
                 display: flex;
                 flex-wrap: wrap;
                 gap: 8px;
             }
 
+            .character-preset-btn,
             .world-preset-btn {
                 border: 1px solid rgba(255, 214, 231, 0.35);
                 background: rgba(255, 214, 231, 0.1);
