@@ -35,12 +35,17 @@ declare global {
 
 export class HUD extends Behaviour {
     private root!: HTMLDivElement;
+    private bottomSheet!: HTMLDivElement;
     private surfaceBadge!: HTMLDivElement;
     private arButton!: HTMLButtonElement;
     private galleryButton!: HTMLButtonElement;
     private magicButton!: HTMLButtonElement;
     private promptInput!: HTMLInputElement;
     private worldInput!: HTMLInputElement;
+    private panelToggleButton!: HTMLButtonElement;
+    private rotateLeftButton!: HTMLButtonElement;
+    private rotateRightButton!: HTMLButtonElement;
+    private advancedPanel!: HTMLDivElement;
     private presetCharacterButtons: HTMLButtonElement[] = [];
     private presetWorldButtons: HTMLButtonElement[] = [];
     private speakButton!: HTMLButtonElement;
@@ -54,6 +59,7 @@ export class HUD extends Behaviour {
     private currentWorldPrompt = "";
     private captureEnabled = false;
     private isBusy = false;
+    private isPanelExpanded = false;
 
     private readonly onSurfaceChange = (event: Event) => {
         const customEvent = event as CustomEvent<{ surfaceDetected: boolean; placementConfirmed: boolean }>;
@@ -67,6 +73,7 @@ export class HUD extends Behaviour {
         this.setupSpeechRecognition();
         this.applySurfaceBadgeState(ARPlacement.surfaceDetected, ARPlacement.placementConfirmed);
         this.updateARButton();
+        this.setPanelExpanded(false);
         this.updateActionState();
     }
 
@@ -97,40 +104,64 @@ export class HUD extends Behaviour {
                 </div>
             </div>
             <div id="hud-bottom">
-                <button id="magic-btn" type="button">MAKE FOR ME</button>
-                <div id="prompt-row">
-                    <input id="prompt-input" type="text" placeholder="Describe your Barbie..." autocomplete="off" />
-                    <button id="speak-btn" type="button" aria-label="Hold to speak">HOLD</button>
-                </div>
-                <div id="character-presets">
-                    <div id="character-presets-label">PRESET DOLLS</div>
-                    <div id="character-preset-row">
-                        ${PRESET_CHARACTERS.map((preset) => `<button class="character-preset-btn" data-character-preset="${preset.id}" type="button">${preset.label}</button>`).join("")}
+                <div id="hud-sheet-header">
+                    <div id="hud-sheet-copy">
+                        <div id="hud-sheet-kicker">DOLL STUDIO</div>
+                        <div id="hud-sheet-title">Place, turn, and capture</div>
+                    </div>
+                    <div id="hud-sheet-actions">
+                        <div id="rotate-controls">
+                            <button id="rotate-left-btn" type="button" aria-label="Rotate doll left">LEFT</button>
+                            <button id="rotate-right-btn" type="button" aria-label="Rotate doll right">RIGHT</button>
+                        </div>
+                        <button id="panel-toggle-btn" type="button" aria-expanded="false">MORE</button>
                     </div>
                 </div>
-                <input id="world-input" type="text" placeholder="Describe the Barbie world..." autocomplete="off" />
-                <div id="world-presets">
-                    <div id="world-presets-label">PRESET WORLDS</div>
-                    <div id="world-preset-row">
-                        ${PRESET_WORLDS.map((preset) => `<button class="world-preset-btn" data-world-preset="${preset.id}" type="button">${preset.label}</button>`).join("")}
+                <div id="hud-primary">
+                    <div id="prompt-row">
+                        <input id="prompt-input" type="text" placeholder="Describe a Barbie look..." autocomplete="off" />
+                        <button id="speak-btn" type="button" aria-label="Hold to speak">HOLD</button>
+                    </div>
+                    <div id="action-row">
+                        <button id="add-btn" type="button" disabled>ADD DOLL</button>
+                        <button id="capture-btn" type="button" disabled>CAPTURE</button>
                     </div>
                 </div>
-                <div id="action-row">
-                    <button id="add-btn" type="button" disabled>ADD TO SCENE</button>
-                    <button id="world-btn" type="button" disabled>BUILD WORLD</button>
+                <div id="hud-advanced" hidden>
+                    <button id="magic-btn" type="button">MAKE FOR ME</button>
+                    <div id="character-presets">
+                        <div id="character-presets-label">PRESET DOLLS</div>
+                        <div id="character-preset-row">
+                            ${PRESET_CHARACTERS.map((preset) => `<button class="character-preset-btn" data-character-preset="${preset.id}" type="button">${preset.label}</button>`).join("")}
+                        </div>
+                    </div>
+                    <div id="world-builder">
+                        <input id="world-input" type="text" placeholder="Describe a Barbie world..." autocomplete="off" />
+                        <div id="world-presets">
+                            <div id="world-presets-label">PRESET WORLDS</div>
+                            <div id="world-preset-row">
+                                ${PRESET_WORLDS.map((preset) => `<button class="world-preset-btn" data-world-preset="${preset.id}" type="button">${preset.label}</button>`).join("")}
+                            </div>
+                        </div>
+                        <button id="world-btn" type="button" disabled>BUILD WORLD</button>
+                    </div>
                 </div>
-                <button id="capture-btn" type="button" disabled>CAPTURE</button>
             </div>
             <div id="status-toast" hidden></div>
         `;
 
         this.getOverlayHost().append(root);
         this.root = root;
+        this.bottomSheet = root.querySelector("#hud-bottom") as HTMLDivElement;
         this.surfaceBadge = root.querySelector("#surface-badge") as HTMLDivElement;
         this.arButton = root.querySelector("#ar-btn") as HTMLButtonElement;
         this.galleryButton = root.querySelector("#gallery-btn") as HTMLButtonElement;
         this.magicButton = root.querySelector("#magic-btn") as HTMLButtonElement;
         this.promptInput = root.querySelector("#prompt-input") as HTMLInputElement;
+        this.panelToggleButton = root.querySelector("#panel-toggle-btn") as HTMLButtonElement;
+        this.rotateLeftButton = root.querySelector("#rotate-left-btn") as HTMLButtonElement;
+        this.rotateRightButton = root.querySelector("#rotate-right-btn") as HTMLButtonElement;
+        this.advancedPanel = root.querySelector("#hud-advanced") as HTMLDivElement;
         this.presetCharacterButtons = Array.from(root.querySelectorAll(".character-preset-btn")) as HTMLButtonElement[];
         this.worldInput = root.querySelector("#world-input") as HTMLInputElement;
         this.presetWorldButtons = Array.from(root.querySelectorAll(".world-preset-btn")) as HTMLButtonElement[];
@@ -156,6 +187,18 @@ export class HUD extends Behaviour {
 
         this.galleryButton.addEventListener("click", () => {
             ScrapbookUI.toggle();
+        });
+
+        this.panelToggleButton.addEventListener("click", () => {
+            this.setPanelExpanded(!this.isPanelExpanded);
+        });
+
+        this.rotateLeftButton.addEventListener("click", () => {
+            this.handleRotateCharacter(-1);
+        });
+
+        this.rotateRightButton.addEventListener("click", () => {
+            this.handleRotateCharacter(1);
         });
 
         this.magicButton.addEventListener("click", () => {
@@ -302,6 +345,7 @@ export class HUD extends Behaviour {
             this.currentPrompt = prompt;
             this.currentWorldPrompt = this.worldInput.value.trim();
             this.captureEnabled = true;
+            this.setPanelExpanded(false);
             this.showToast("Barbie arrived");
             window.setTimeout(() => this.hideToast(), 1200);
         }
@@ -356,10 +400,13 @@ export class HUD extends Behaviour {
                 ? SceneRig.instance.root.position.clone()
                 : ARPlacement.lastHitPosition.clone();
 
-            await CharacterSpawner.instance.spawnAt(preset.glbUrl, placement);
+            await CharacterSpawner.instance.spawnAt(preset.glbUrl, placement, {
+                initialYRotation: preset.initialYRotation,
+            });
             this.currentPrompt = preset.prompt;
             this.promptInput.value = preset.prompt;
             this.captureEnabled = true;
+            this.setPanelExpanded(false);
             this.showToast(`${preset.prompt} ready`);
             window.setTimeout(() => this.hideToast(), 1400);
         }
@@ -401,6 +448,7 @@ export class HUD extends Behaviour {
 
             await WorldSpawner.instance.spawnAt(world, placement);
             this.currentWorldPrompt = prompt;
+            this.setPanelExpanded(false);
             this.showToast("World ready");
             window.setTimeout(() => this.hideToast(), 1400);
         }
@@ -454,6 +502,7 @@ export class HUD extends Behaviour {
             await WorldSpawner.instance.spawnAt(preset.world, placement);
             this.currentWorldPrompt = preset.world.caption;
             this.worldInput.value = preset.world.caption;
+            this.setPanelExpanded(false);
             this.showToast(`${preset.world.caption} ready`);
             window.setTimeout(() => this.hideToast(), 1400);
         }
@@ -594,6 +643,9 @@ export class HUD extends Behaviour {
         this.magicButton.disabled = this.isBusy;
         this.addButton.disabled = this.isBusy || this.promptInput.value.trim().length === 0;
         this.buildWorldButton.disabled = this.isBusy || this.worldInput.value.trim().length === 0;
+        const canRotateCharacter = !this.isBusy && !!CharacterSpawner.instance?.spawnedObject;
+        this.rotateLeftButton.disabled = !canRotateCharacter;
+        this.rotateRightButton.disabled = !canRotateCharacter;
         this.presetCharacterButtons.forEach((button) => {
             button.disabled = this.isBusy;
         });
@@ -605,6 +657,22 @@ export class HUD extends Behaviour {
 
     private updateARButton(): void {
         this.arButton.textContent = NeedleXRSession.active?.isAR ? "EXIT AR" : "START AR";
+    }
+
+    private handleRotateCharacter(direction: -1 | 1): void {
+        const rotated = CharacterSpawner.instance?.rotateByRadians(direction * (Math.PI / 8));
+        if (!rotated) return;
+        this.showToast(direction < 0 ? "Turned left" : "Turned right");
+        window.setTimeout(() => this.hideToast(), 900);
+        this.updateActionState();
+    }
+
+    private setPanelExpanded(expanded: boolean): void {
+        this.isPanelExpanded = expanded;
+        this.advancedPanel.hidden = !expanded;
+        this.bottomSheet.classList.toggle("is-expanded", expanded);
+        this.panelToggleButton.textContent = expanded ? "LESS" : "MORE";
+        this.panelToggleButton.setAttribute("aria-expanded", String(expanded));
     }
 
     private showToast(message: string): void {
@@ -632,7 +700,6 @@ export class HUD extends Behaviour {
             #barbie-hud button,
             #barbie-hud input {
                 font-family: "DM Mono", monospace;
-                border-radius: 100px;
                 min-height: 44px;
             }
 
@@ -643,34 +710,35 @@ export class HUD extends Behaviour {
 
             #hud-top {
                 position: fixed;
-                top: 16px;
-                left: 16px;
-                right: 16px;
+                top: calc(env(safe-area-inset-top, 0px) + 12px);
+                left: 12px;
+                right: 12px;
                 display: flex;
                 justify-content: space-between;
                 align-items: center;
-                gap: 12px;
+                gap: 10px;
             }
 
             #top-actions {
                 display: flex;
                 align-items: center;
-                gap: 10px;
+                gap: 8px;
             }
 
             #surface-badge,
             #ar-btn,
-            #gallery-btn,
-            #magic-btn {
-                padding: 10px 16px;
+            #gallery-btn {
+                min-height: 42px;
+                padding: 0 14px;
+                border-radius: 18px;
             }
 
             #surface-badge {
-                background: rgba(20,0,16,0.85);
+                background: rgba(20,0,16,0.8);
                 border: 1px solid rgba(255,36,114,0.3);
                 color: rgba(255,255,255,0.6);
                 font-size: 11px;
-                letter-spacing: 2px;
+                letter-spacing: 2.2px;
                 transition: color 0.3s ease, border-color 0.3s ease;
             }
 
@@ -686,7 +754,7 @@ export class HUD extends Behaviour {
 
             #gallery-btn {
                 border: 1px solid rgba(255,255,255,0.18);
-                background: rgba(12,0,8,0.72);
+                background: rgba(12,0,8,0.62);
                 color: white;
                 letter-spacing: 1px;
             }
@@ -713,42 +781,104 @@ export class HUD extends Behaviour {
 
             #hud-bottom {
                 position: fixed;
-                left: 0;
-                right: 0;
-                bottom: 0;
+                left: 50%;
+                transform: translateX(-50%);
+                bottom: calc(env(safe-area-inset-bottom, 0px) + 14px);
+                width: min(calc(100vw - 24px), 560px);
                 display: flex;
                 flex-direction: column;
-                gap: 10px;
-                padding: 16px 16px 32px;
-                background: rgba(10,0,8,0.9);
-                backdrop-filter: blur(12px);
+                gap: 12px;
+                padding: 14px;
+                border-radius: 28px;
+                border: 1px solid rgba(255, 214, 231, 0.16);
+                background:
+                    linear-gradient(180deg, rgba(38, 6, 24, 0.92), rgba(18, 3, 14, 0.96)),
+                    rgba(10, 0, 8, 0.9);
+                box-shadow: 0 18px 48px rgba(0, 0, 0, 0.32);
+                backdrop-filter: blur(18px);
+                max-height: min(76vh, 620px);
+                overflow-y: auto;
             }
 
-            #magic-btn {
-                border: 1px solid rgba(255,214,231,0.4);
-                background: linear-gradient(135deg, rgba(255,214,231,0.18), rgba(255,36,114,0.22));
-                color: #fff1f7;
-                letter-spacing: 1px;
-            }
-
+            #hud-sheet-header,
+            #hud-sheet-actions,
+            #rotate-controls,
             #prompt-row,
             #action-row {
                 display: flex;
+                align-items: center;
                 gap: 10px;
             }
 
-            #character-presets,
-            #world-presets {
-                display: flex;
-                flex-direction: column;
-                gap: 8px;
+            #hud-sheet-header {
+                justify-content: space-between;
+                align-items: flex-start;
+                gap: 12px;
             }
 
+            #hud-sheet-copy {
+                display: flex;
+                flex-direction: column;
+                gap: 4px;
+            }
+
+            #hud-sheet-kicker,
             #character-presets-label,
             #world-presets-label {
                 color: rgba(255,255,255,0.48);
                 font-size: 11px;
-                letter-spacing: 1.8px;
+                letter-spacing: 2px;
+            }
+
+            #hud-sheet-title {
+                color: #fff2f7;
+                font-size: 13px;
+                letter-spacing: 0.4px;
+            }
+
+            #panel-toggle-btn,
+            #rotate-left-btn,
+            #rotate-right-btn,
+            #magic-btn,
+            #world-btn,
+            #speak-btn,
+            #add-btn,
+            #capture-btn,
+            .character-preset-btn,
+            .world-preset-btn {
+                border-radius: 18px;
+            }
+
+            #panel-toggle-btn,
+            #rotate-left-btn,
+            #rotate-right-btn {
+                padding: 0 14px;
+                border: 1px solid rgba(255,255,255,0.14);
+                background: rgba(255,255,255,0.08);
+                color: white;
+                font-size: 12px;
+                letter-spacing: 1px;
+            }
+
+            #panel-toggle-btn {
+                border-color: rgba(255,36,114,0.28);
+                background: rgba(255,36,114,0.18);
+                color: #ffd6e7;
+            }
+
+            #hud-primary,
+            #hud-advanced,
+            #character-presets,
+            #world-builder,
+            #world-presets {
+                display: flex;
+                flex-direction: column;
+                gap: 10px;
+            }
+
+            #hud-advanced {
+                padding-top: 4px;
+                border-top: 1px solid rgba(255,255,255,0.08);
             }
 
             #character-preset-row,
@@ -765,18 +895,18 @@ export class HUD extends Behaviour {
                 color: #fff1f7;
                 padding: 10px 14px;
                 letter-spacing: 1px;
-                min-height: 40px;
             }
 
             #prompt-input,
             #world-input {
                 width: 100%;
                 border: 1px solid rgba(255,255,255,0.15);
-                background: rgba(255,255,255,0.08);
+                background: rgba(255,255,255,0.07);
                 color: white;
                 padding: 12px 16px;
                 font-size: 14px;
                 min-width: 0;
+                border-radius: 18px;
             }
 
             #prompt-input {
@@ -805,13 +935,20 @@ export class HUD extends Behaviour {
             #world-btn {
                 flex: 1;
                 border: 1px solid rgba(255,36,114,0.4);
-                background: rgba(255,36,114,0.15);
+                background: rgba(255,36,114,0.18);
                 color: #FFADD0;
+            }
+
+            #magic-btn {
+                border: 1px solid rgba(255,214,231,0.32);
+                background: linear-gradient(135deg, rgba(255,214,231,0.12), rgba(255,36,114,0.2));
+                color: #fff1f7;
+                letter-spacing: 1px;
             }
 
             #add-btn:not(:disabled),
             #world-btn:not(:disabled) {
-                background: rgba(255,36,114,0.25);
+                background: rgba(255,36,114,0.24);
             }
 
             #capture-btn {
@@ -821,19 +958,27 @@ export class HUD extends Behaviour {
                 font-weight: 600;
             }
 
+            #world-btn {
+                width: 100%;
+            }
+
             #magic-btn:disabled,
             #add-btn:disabled,
             #world-btn:disabled,
-            #capture-btn:disabled {
+            #capture-btn:disabled,
+            #rotate-left-btn:disabled,
+            #rotate-right-btn:disabled,
+            .character-preset-btn:disabled,
+            .world-preset-btn:disabled {
                 opacity: 0.4;
             }
 
             #status-toast {
                 position: fixed;
-                top: 50%;
+                top: calc(env(safe-area-inset-top, 0px) + 84px);
                 left: 50%;
-                transform: translate(-50%, -50%);
-                max-width: calc(100vw - 48px);
+                transform: translateX(-50%);
+                max-width: min(calc(100vw - 48px), 360px);
                 padding: 12px 24px;
                 border-radius: 12px;
                 border: 1px solid rgba(255,36,114,0.3);
@@ -843,6 +988,38 @@ export class HUD extends Behaviour {
                 text-align: center;
                 pointer-events: none;
                 z-index: 90;
+            }
+
+            @media (max-width: 520px) {
+                #hud-top {
+                    gap: 8px;
+                }
+
+                #hud-bottom {
+                    width: calc(100vw - 20px);
+                    bottom: calc(env(safe-area-inset-bottom, 0px) + 10px);
+                    padding: 12px;
+                    border-radius: 24px;
+                }
+
+                #hud-sheet-header {
+                    flex-direction: column;
+                    align-items: stretch;
+                }
+
+                #hud-sheet-actions {
+                    justify-content: space-between;
+                }
+
+                #rotate-controls {
+                    flex: 1;
+                }
+
+                #rotate-left-btn,
+                #rotate-right-btn,
+                #panel-toggle-btn {
+                    flex: 1;
+                }
             }
         `;
 

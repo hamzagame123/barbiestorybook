@@ -7,6 +7,7 @@ export type PresetCharacter = {
     label: string;
     prompt: string;
     glbUrl: string;
+    initialYRotation?: number;
 };
 
 export const PRESET_CHARACTERS: PresetCharacter[] = [
@@ -15,6 +16,7 @@ export const PRESET_CHARACTERS: PresetCharacter[] = [
         label: "TEST BARBIE",
         prompt: "Test Barbie",
         glbUrl: testBarbieGlbUrl,
+        initialYRotation: Math.PI,
     },
 ];
 

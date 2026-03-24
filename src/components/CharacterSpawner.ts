@@ -5,6 +5,10 @@ import { SceneRig } from "./SceneRig";
 const TARGET_SCALE = 0.2;
 const POP_DURATION_MS = 400;
 
+type SpawnCharacterOptions = {
+    initialYRotation?: number;
+};
+
 export class CharacterSpawner extends Behaviour {
     static instance: CharacterSpawner | null = null;
 
@@ -21,7 +25,7 @@ export class CharacterSpawner extends Behaviour {
         this.clearScene();
     }
 
-    async spawnAt(glbUrl: string, position: THREE.Vector3): Promise<void> {
+    async spawnAt(glbUrl: string, position: THREE.Vector3, options: SpawnCharacterOptions = {}): Promise<void> {
         this.clearScene();
 
         const rig = SceneRig.instance;
@@ -39,6 +43,7 @@ export class CharacterSpawner extends Behaviour {
 
         rig.placeAt(position, true);
         instance.position.set(0, 0, 0);
+        instance.rotation.set(0, options.initialYRotation ?? 0, 0);
         instance.scale.setScalar(0);
         rig.root.add(instance);
         this.spawnedObject = instance;
@@ -63,5 +68,11 @@ export class CharacterSpawner extends Behaviour {
         if (!this.spawnedObject) return;
         destroy(this.spawnedObject);
         this.spawnedObject = null;
+    }
+
+    rotateByRadians(deltaRadians: number): boolean {
+        if (!this.spawnedObject) return false;
+        this.spawnedObject.rotation.y += deltaRadians;
+        return true;
     }
 }
