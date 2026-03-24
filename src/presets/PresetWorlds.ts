@@ -1,6 +1,6 @@
 import type { MarbleWorldAssets } from "../api/WorldLabsClient";
 
-const dreamhousePanoUrl = new URL("../assets/worlds/barbie-dreamhouse-pano.png", import.meta.url).toString();
+const dreamhousePanoUrl = new URL("../assets/worlds/barbie-dreamhouse-pano.jpg", import.meta.url).toString();
 
 export type PresetWorldId = "dreamhouse";
 
