@@ -1,6 +1,7 @@
 import { Behaviour, type NeedleXREventArgs } from "@needle-tools/engine";
 import * as THREE from "three";
 import { ARPlacement } from "./ARPlacement";
+import { CharacterSpawner } from "./CharacterSpawner";
 import { SceneRig } from "./SceneRig";
 
 type GesturePointerEvent = Event & {
@@ -15,6 +16,7 @@ export class SceneGestures extends Behaviour {
     private readonly pointers = new Map<number, THREE.Vector2>();
     private pinchStartDistance = 0;
     private pinchStartScale = 1;
+    private twistStartAngle = 0;
     private hadMultitouch = false;
 
     private readonly onPointerDown = (event: Event) => {
@@ -53,6 +55,7 @@ export class SceneGestures extends Behaviour {
         if (this.pointers.size < 2) {
             this.pinchStartDistance = 0;
             this.pinchStartScale = SceneRig.instance?.getScale() ?? 1;
+            this.twistStartAngle = 0;
         }
         if (this.pointers.size === 0) {
             this.hadMultitouch = false;
@@ -75,6 +78,7 @@ export class SceneGestures extends Behaviour {
     onLeaveXR(): void {
         this.pointers.clear();
         this.pinchStartDistance = 0;
+        this.twistStartAngle = 0;
         this.hadMultitouch = false;
     }
 
@@ -86,6 +90,12 @@ export class SceneGestures extends Behaviour {
             const currentDistance = this.getCurrentPinchDistance();
             if (this.pinchStartDistance > 0 && currentDistance > 0) {
                 rig.applyScale(this.pinchStartScale * (currentDistance / this.pinchStartDistance));
+            }
+
+            const currentAngle = this.getCurrentTwistAngle();
+            if (this.twistStartAngle !== 0 && currentAngle !== 0) {
+                CharacterSpawner.instance?.rotateByRadians(currentAngle - this.twistStartAngle);
+                this.twistStartAngle = currentAngle;
             }
             return;
         }
@@ -115,11 +125,20 @@ export class SceneGestures extends Behaviour {
 
         this.pinchStartDistance = distance;
         this.pinchStartScale = SceneRig.instance?.getScale() ?? 1;
+        this.twistStartAngle = this.getCurrentTwistAngle();
     }
 
     private getCurrentPinchDistance(): number {
         const touches = Array.from(this.pointers.values());
         if (touches.length < 2) return 0;
         return touches[0].distanceTo(touches[1]);
+    }
+
+    private getCurrentTwistAngle(): number {
+        const touches = Array.from(this.pointers.values());
+        if (touches.length < 2) return 0;
+
+        const delta = new THREE.Vector2().subVectors(touches[1], touches[0]);
+        return Math.atan2(delta.y, delta.x);
     }
 }

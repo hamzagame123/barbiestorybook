@@ -37,6 +37,8 @@ export class HUD extends Behaviour {
     private root!: HTMLDivElement;
     private bottomSheet!: HTMLDivElement;
     private surfaceBadge!: HTMLDivElement;
+    private sheetKicker!: HTMLDivElement;
+    private sheetTitle!: HTMLDivElement;
     private arButton!: HTMLButtonElement;
     private galleryButton!: HTMLButtonElement;
     private magicButton!: HTMLButtonElement;
@@ -45,8 +47,6 @@ export class HUD extends Behaviour {
     private actionRow!: HTMLDivElement;
     private worldInput!: HTMLInputElement;
     private panelToggleButton!: HTMLButtonElement;
-    private rotateLeftButton!: HTMLButtonElement;
-    private rotateRightButton!: HTMLButtonElement;
     private advancedPanel!: HTMLDivElement;
     private presetCharacterButtons: HTMLButtonElement[] = [];
     private presetWorldButtons: HTMLButtonElement[] = [];
@@ -78,6 +78,9 @@ export class HUD extends Behaviour {
         this.setPanelExpanded(false);
         this.updateHudMode();
         this.updateActionState();
+        window.requestAnimationFrame(() => {
+            this.root.classList.add("is-ready");
+        });
     }
 
     onDestroy(): void {
@@ -114,13 +117,9 @@ export class HUD extends Behaviour {
                 <div id="hud-sheet-header">
                     <div id="hud-sheet-copy">
                         <div id="hud-sheet-kicker">DOLL STUDIO</div>
-                        <div id="hud-sheet-title">Place, turn, and capture</div>
+                        <div id="hud-sheet-title">Place, pose, and capture</div>
                     </div>
                     <div id="hud-sheet-actions">
-                        <div id="rotate-controls">
-                            <button id="rotate-left-btn" type="button" aria-label="Rotate doll left">LEFT</button>
-                            <button id="rotate-right-btn" type="button" aria-label="Rotate doll right">RIGHT</button>
-                        </div>
                         <button id="panel-toggle-btn" type="button" aria-expanded="false">MORE</button>
                     </div>
                 </div>
@@ -134,7 +133,7 @@ export class HUD extends Behaviour {
                         <button id="capture-btn" type="button" disabled>CAPTURE</button>
                     </div>
                 </div>
-                <div id="hud-advanced" hidden>
+                <div id="hud-advanced" aria-hidden="true">
                     <button id="magic-btn" type="button">MAKE FOR ME</button>
                     <div id="character-presets">
                         <div id="character-presets-label">PRESET DOLLS</div>
@@ -161,6 +160,8 @@ export class HUD extends Behaviour {
         this.root = root;
         this.bottomSheet = root.querySelector("#hud-bottom") as HTMLDivElement;
         this.surfaceBadge = root.querySelector("#surface-badge") as HTMLDivElement;
+        this.sheetKicker = root.querySelector("#hud-sheet-kicker") as HTMLDivElement;
+        this.sheetTitle = root.querySelector("#hud-sheet-title") as HTMLDivElement;
         this.arButton = root.querySelector("#ar-btn") as HTMLButtonElement;
         this.galleryButton = root.querySelector("#gallery-btn") as HTMLButtonElement;
         this.magicButton = root.querySelector("#magic-btn") as HTMLButtonElement;
@@ -168,8 +169,6 @@ export class HUD extends Behaviour {
         this.promptRow = root.querySelector("#prompt-row") as HTMLDivElement;
         this.actionRow = root.querySelector("#action-row") as HTMLDivElement;
         this.panelToggleButton = root.querySelector("#panel-toggle-btn") as HTMLButtonElement;
-        this.rotateLeftButton = root.querySelector("#rotate-left-btn") as HTMLButtonElement;
-        this.rotateRightButton = root.querySelector("#rotate-right-btn") as HTMLButtonElement;
         this.advancedPanel = root.querySelector("#hud-advanced") as HTMLDivElement;
         this.presetCharacterButtons = Array.from(root.querySelectorAll(".character-preset-btn")) as HTMLButtonElement[];
         this.worldInput = root.querySelector("#world-input") as HTMLInputElement;
@@ -200,14 +199,6 @@ export class HUD extends Behaviour {
 
         this.panelToggleButton.addEventListener("click", () => {
             this.setPanelExpanded(!this.isPanelExpanded);
-        });
-
-        this.rotateLeftButton.addEventListener("click", () => {
-            this.handleRotateCharacter(-1);
-        });
-
-        this.rotateRightButton.addEventListener("click", () => {
-            this.handleRotateCharacter(1);
         });
 
         this.magicButton.addEventListener("click", () => {
@@ -656,9 +647,6 @@ export class HUD extends Behaviour {
         this.magicButton.disabled = this.isBusy;
         this.addButton.disabled = this.isBusy || this.promptInput.value.trim().length === 0;
         this.buildWorldButton.disabled = this.isBusy || this.worldInput.value.trim().length === 0;
-        const canRotateCharacter = !this.isBusy && !!CharacterSpawner.instance?.spawnedObject;
-        this.rotateLeftButton.disabled = !canRotateCharacter;
-        this.rotateRightButton.disabled = !canRotateCharacter;
         this.presetCharacterButtons.forEach((button) => {
             button.disabled = this.isBusy;
         });
@@ -673,18 +661,10 @@ export class HUD extends Behaviour {
         this.arButton.textContent = NeedleXRSession.active?.isAR ? "EXIT AR" : "START AR";
     }
 
-    private handleRotateCharacter(direction: -1 | 1): void {
-        const rotated = CharacterSpawner.instance?.rotateByRadians(direction * (Math.PI / 8));
-        if (!rotated) return;
-        this.showToast(direction < 0 ? "Turned left" : "Turned right");
-        window.setTimeout(() => this.hideToast(), 900);
-        this.updateActionState();
-    }
-
     private setPanelExpanded(expanded: boolean): void {
         this.isPanelExpanded = expanded;
-        this.advancedPanel.hidden = !expanded;
         this.bottomSheet.classList.toggle("is-expanded", expanded);
+        this.advancedPanel.setAttribute("aria-hidden", String(!expanded));
         this.panelToggleButton.textContent = expanded ? "LESS" : "MORE";
         this.panelToggleButton.setAttribute("aria-expanded", String(expanded));
     }
@@ -694,17 +674,45 @@ export class HUD extends Behaviour {
         const hasPlacedDoll = !!CharacterSpawner.instance?.spawnedObject;
         const captureMode = this.captureEnabled && hasPlacedDoll;
         const compactArMode = isArSession && !this.isPanelExpanded;
+        const placementConfirmed = ARPlacement.placementConfirmed;
 
-        this.promptRow.hidden = captureMode || compactArMode;
+        let stage = "setup";
+        let kicker = "DOLL STUDIO";
+        let title = "Place, pose, and capture";
+
+        if (!placementConfirmed) {
+            stage = "placement";
+            kicker = "SCAN";
+            title = "Find a surface to place your scene";
+        }
+        else if (!hasPlacedDoll) {
+            stage = "doll";
+            kicker = "PLACE";
+            title = "Add a doll to start composing";
+        }
+        else if (captureMode) {
+            stage = "capture";
+            kicker = "CAPTURE";
+            title = "Drag, pinch, and twist to frame the shot";
+        }
+
+        if (this.isPanelExpanded) {
+            stage = "advanced";
+            kicker = "TOOLS";
+            title = "Presets and world controls";
+        }
+
+        this.sheetKicker.textContent = kicker;
+        this.sheetTitle.textContent = title;
+
+        this.promptRow.classList.toggle("is-hidden", captureMode || compactArMode);
         this.actionRow.classList.toggle("is-capture-mode", captureMode);
-        this.addButton.hidden = captureMode;
-        this.captureButton.hidden = !captureMode;
-        this.rotateLeftButton.hidden = !captureMode;
-        this.rotateRightButton.hidden = !captureMode;
+        this.addButton.classList.toggle("is-hidden", captureMode);
+        this.captureButton.classList.toggle("is-hidden", !captureMode);
         this.bottomSheet.classList.toggle("is-ar-session", isArSession);
         this.bottomSheet.classList.toggle("is-compact", compactArMode);
-        this.bottomSheet.classList.toggle("has-character-controls", captureMode);
         this.bottomSheet.classList.toggle("is-capture-mode", captureMode);
+        this.bottomSheet.dataset.stage = stage;
     }
 
     private showToast(message: string): void {
@@ -729,6 +737,12 @@ export class HUD extends Behaviour {
                 pointer-events: none;
             }
 
+            #barbie-hud *,
+            #barbie-hud *::before,
+            #barbie-hud *::after {
+                box-sizing: border-box;
+            }
+
             #barbie-hud button,
             #barbie-hud input {
                 font-family: "DM Mono", monospace;
@@ -749,6 +763,14 @@ export class HUD extends Behaviour {
                 justify-content: space-between;
                 align-items: center;
                 gap: 10px;
+                opacity: 0;
+                transform: translateY(-12px);
+                transition: opacity 0.34s ease, transform 0.34s ease;
+            }
+
+            #barbie-hud.is-ready #hud-top {
+                opacity: 1;
+                transform: translateY(0);
             }
 
             #top-actions {
@@ -814,7 +836,7 @@ export class HUD extends Behaviour {
             #hud-bottom {
                 position: fixed;
                 left: 50%;
-                transform: translateX(-50%);
+                transform: translateX(-50%) translateY(24px) scale(0.98);
                 bottom: calc(env(safe-area-inset-bottom, 0px) + 14px);
                 width: min(calc(100vw - 24px), 560px);
                 display: flex;
@@ -830,6 +852,20 @@ export class HUD extends Behaviour {
                 backdrop-filter: blur(18px);
                 max-height: min(76vh, 620px);
                 overflow-y: auto;
+                opacity: 0;
+                transition:
+                    opacity 0.34s ease,
+                    transform 0.38s cubic-bezier(0.2, 0.9, 0.2, 1),
+                    width 0.28s ease,
+                    padding 0.28s ease,
+                    gap 0.28s ease,
+                    border-radius 0.28s ease,
+                    box-shadow 0.28s ease;
+            }
+
+            #barbie-hud.is-ready #hud-bottom {
+                opacity: 1;
+                transform: translateX(-50%) translateY(0) scale(1);
             }
 
             #hud-bottom.is-ar-session.is-compact {
@@ -841,11 +877,11 @@ export class HUD extends Behaviour {
                 border-radius: 22px;
                 max-height: none;
                 overflow: visible;
+                box-shadow: 0 10px 24px rgba(0, 0, 0, 0.24);
             }
 
             #hud-sheet-header,
             #hud-sheet-actions,
-            #rotate-controls,
             #prompt-row,
             #action-row {
                 display: flex;
@@ -868,24 +904,19 @@ export class HUD extends Behaviour {
                 display: flex;
                 flex-direction: column;
                 gap: 4px;
+                transition: opacity 0.22s ease, transform 0.22s ease;
             }
 
             #hud-bottom.is-ar-session.is-compact #hud-sheet-copy {
-                display: none;
+                opacity: 0;
+                transform: translateY(-6px);
+                pointer-events: none;
+                position: absolute;
             }
 
             #hud-bottom.is-ar-session.is-compact #hud-sheet-actions {
                 width: 100%;
-                justify-content: space-between;
-            }
-
-            #hud-bottom.is-ar-session.is-compact #rotate-controls {
-                display: none;
-            }
-
-            #hud-bottom.is-ar-session.is-compact.has-character-controls #rotate-controls {
-                display: flex;
-                flex: 1;
+                justify-content: flex-end;
             }
 
             #hud-bottom.is-ar-session.is-compact #panel-toggle-btn {
@@ -907,8 +938,6 @@ export class HUD extends Behaviour {
             }
 
             #panel-toggle-btn,
-            #rotate-left-btn,
-            #rotate-right-btn,
             #magic-btn,
             #world-btn,
             #speak-btn,
@@ -919,15 +948,18 @@ export class HUD extends Behaviour {
                 border-radius: 18px;
             }
 
-            #panel-toggle-btn,
-            #rotate-left-btn,
-            #rotate-right-btn {
+            #panel-toggle-btn {
                 padding: 0 14px;
                 border: 1px solid rgba(255,255,255,0.14);
                 background: rgba(255,255,255,0.08);
                 color: white;
                 font-size: 12px;
                 letter-spacing: 1px;
+                transition:
+                    transform 0.18s ease,
+                    background 0.22s ease,
+                    border-color 0.22s ease,
+                    color 0.22s ease;
             }
 
             #panel-toggle-btn {
@@ -950,9 +982,53 @@ export class HUD extends Behaviour {
                 gap: 8px;
             }
 
+            #hud-primary > *,
+            #hud-advanced > * {
+                transition:
+                    opacity 0.22s ease,
+                    transform 0.26s cubic-bezier(0.2, 0.9, 0.2, 1),
+                    max-height 0.24s ease,
+                    margin 0.24s ease,
+                    padding 0.24s ease;
+            }
+
+            #hud-primary > *:nth-child(1),
+            #hud-advanced > *:nth-child(1) {
+                transition-delay: 0.02s;
+            }
+
+            #hud-primary > *:nth-child(2),
+            #hud-advanced > *:nth-child(2) {
+                transition-delay: 0.05s;
+            }
+
+            #hud-advanced > *:nth-child(3) {
+                transition-delay: 0.08s;
+            }
+
             #hud-advanced {
-                padding-top: 4px;
-                border-top: 1px solid rgba(255,255,255,0.08);
+                max-height: 0;
+                opacity: 0;
+                overflow: hidden;
+                padding-top: 0;
+                border-top: 1px solid rgba(255,255,255,0);
+                transform: translateY(8px);
+                pointer-events: none;
+                transition:
+                    max-height 0.34s cubic-bezier(0.2, 0.9, 0.2, 1),
+                    opacity 0.22s ease,
+                    transform 0.28s ease,
+                    padding-top 0.24s ease,
+                    border-color 0.24s ease;
+            }
+
+            #hud-bottom.is-expanded #hud-advanced {
+                max-height: 420px;
+                opacity: 1;
+                padding-top: 10px;
+                border-top-color: rgba(255,255,255,0.08);
+                transform: translateY(0);
+                pointer-events: auto;
             }
 
             #character-preset-row,
@@ -981,6 +1057,10 @@ export class HUD extends Behaviour {
                 font-size: 14px;
                 min-width: 0;
                 border-radius: 18px;
+                transition:
+                    border-color 0.2s ease,
+                    background 0.2s ease,
+                    transform 0.18s ease;
             }
 
             #prompt-input {
@@ -1011,6 +1091,19 @@ export class HUD extends Behaviour {
                 border: 1px solid rgba(255,36,114,0.4);
                 background: rgba(255,36,114,0.18);
                 color: #FFADD0;
+            }
+
+            #prompt-row.is-hidden,
+            #add-btn.is-hidden,
+            #capture-btn.is-hidden {
+                opacity: 0;
+                transform: translateY(10px) scale(0.98);
+                pointer-events: none;
+                max-height: 0;
+                margin: 0;
+                padding-top: 0;
+                padding-bottom: 0;
+                overflow: hidden;
             }
 
             #hud-bottom.is-ar-session.is-compact #add-btn,
@@ -1045,11 +1138,13 @@ export class HUD extends Behaviour {
             #add-btn:disabled,
             #world-btn:disabled,
             #capture-btn:disabled,
-            #rotate-left-btn:disabled,
-            #rotate-right-btn:disabled,
             .character-preset-btn:disabled,
             .world-preset-btn:disabled {
                 opacity: 0.4;
+            }
+
+            #barbie-hud button:not(:disabled):active {
+                transform: scale(0.98);
             }
 
             #status-toast {
@@ -1067,6 +1162,18 @@ export class HUD extends Behaviour {
                 text-align: center;
                 pointer-events: none;
                 z-index: 90;
+                opacity: 0;
+                transform: translateX(-50%) translateY(-8px);
+                transition: opacity 0.22s ease, transform 0.22s ease;
+            }
+
+            #status-toast:not([hidden]) {
+                opacity: 1;
+                transform: translateX(-50%) translateY(0);
+            }
+
+            #hud-bottom[data-stage="capture"] {
+                box-shadow: 0 12px 30px rgba(0, 0, 0, 0.26);
             }
 
             @media (max-width: 520px) {
@@ -1090,12 +1197,6 @@ export class HUD extends Behaviour {
                     justify-content: space-between;
                 }
 
-                #rotate-controls {
-                    flex: 1;
-                }
-
-                #rotate-left-btn,
-                #rotate-right-btn,
                 #panel-toggle-btn {
                     flex: 1;
                 }
@@ -1103,6 +1204,20 @@ export class HUD extends Behaviour {
                 #hud-bottom.is-ar-session.is-compact {
                     min-width: 0;
                     width: calc(100vw - 20px);
+                }
+
+                #hud-bottom.is-ar-session.is-compact #hud-sheet-header {
+                    flex-direction: row;
+                    align-items: center;
+                }
+            }
+
+            @media (prefers-reduced-motion: reduce) {
+                #barbie-hud *,
+                #barbie-hud *::before,
+                #barbie-hud *::after {
+                    transition: none !important;
+                    animation: none !important;
                 }
             }
         `;
