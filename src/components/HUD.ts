@@ -88,10 +88,14 @@ export class HUD extends Behaviour {
 
     onEnterXR(): void {
         this.updateARButton();
+        this.setPanelExpanded(false);
+        this.updateHudMode();
     }
 
     onLeaveXR(): void {
         this.updateARButton();
+        this.setPanelExpanded(false);
+        this.updateHudMode();
     }
 
     private injectMarkup(): void {
@@ -686,15 +690,20 @@ export class HUD extends Behaviour {
     }
 
     private updateHudMode(): void {
+        const isArSession = !!NeedleXRSession.active?.isAR;
         const hasPlacedDoll = !!CharacterSpawner.instance?.spawnedObject;
         const captureMode = this.captureEnabled && hasPlacedDoll;
+        const compactArMode = isArSession && !this.isPanelExpanded;
 
-        this.promptRow.hidden = captureMode;
+        this.promptRow.hidden = captureMode || compactArMode;
         this.actionRow.classList.toggle("is-capture-mode", captureMode);
         this.addButton.hidden = captureMode;
         this.captureButton.hidden = !captureMode;
         this.rotateLeftButton.hidden = !captureMode;
         this.rotateRightButton.hidden = !captureMode;
+        this.bottomSheet.classList.toggle("is-ar-session", isArSession);
+        this.bottomSheet.classList.toggle("is-compact", compactArMode);
+        this.bottomSheet.classList.toggle("has-character-controls", captureMode);
         this.bottomSheet.classList.toggle("is-capture-mode", captureMode);
     }
 
@@ -823,6 +832,17 @@ export class HUD extends Behaviour {
                 overflow-y: auto;
             }
 
+            #hud-bottom.is-ar-session.is-compact {
+                width: auto;
+                min-width: min(320px, calc(100vw - 24px));
+                max-width: calc(100vw - 24px);
+                padding: 10px;
+                gap: 8px;
+                border-radius: 22px;
+                max-height: none;
+                overflow: visible;
+            }
+
             #hud-sheet-header,
             #hud-sheet-actions,
             #rotate-controls,
@@ -839,10 +859,37 @@ export class HUD extends Behaviour {
                 gap: 12px;
             }
 
+            #hud-bottom.is-ar-session.is-compact #hud-sheet-header {
+                align-items: center;
+                gap: 8px;
+            }
+
             #hud-sheet-copy {
                 display: flex;
                 flex-direction: column;
                 gap: 4px;
+            }
+
+            #hud-bottom.is-ar-session.is-compact #hud-sheet-copy {
+                display: none;
+            }
+
+            #hud-bottom.is-ar-session.is-compact #hud-sheet-actions {
+                width: 100%;
+                justify-content: space-between;
+            }
+
+            #hud-bottom.is-ar-session.is-compact #rotate-controls {
+                display: none;
+            }
+
+            #hud-bottom.is-ar-session.is-compact.has-character-controls #rotate-controls {
+                display: flex;
+                flex: 1;
+            }
+
+            #hud-bottom.is-ar-session.is-compact #panel-toggle-btn {
+                min-width: 92px;
             }
 
             #hud-sheet-kicker,
@@ -897,6 +944,10 @@ export class HUD extends Behaviour {
                 display: flex;
                 flex-direction: column;
                 gap: 10px;
+            }
+
+            #hud-bottom.is-ar-session.is-compact #hud-primary {
+                gap: 8px;
             }
 
             #hud-advanced {
@@ -960,6 +1011,11 @@ export class HUD extends Behaviour {
                 border: 1px solid rgba(255,36,114,0.4);
                 background: rgba(255,36,114,0.18);
                 color: #FFADD0;
+            }
+
+            #hud-bottom.is-ar-session.is-compact #add-btn,
+            #hud-bottom.is-ar-session.is-compact #capture-btn {
+                min-width: 148px;
             }
 
             #magic-btn {
@@ -1042,6 +1098,11 @@ export class HUD extends Behaviour {
                 #rotate-right-btn,
                 #panel-toggle-btn {
                     flex: 1;
+                }
+
+                #hud-bottom.is-ar-session.is-compact {
+                    min-width: 0;
+                    width: calc(100vw - 20px);
                 }
             }
         `;
