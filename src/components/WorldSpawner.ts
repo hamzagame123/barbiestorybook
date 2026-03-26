@@ -1,5 +1,6 @@
 import { AssetReference, Behaviour, destroy } from "@needle-tools/engine";
 import * as THREE from "three";
+import { FBXLoader } from "three/examples/jsm/loaders/FBXLoader.js";
 import type { MarbleWorldAssets } from "../api/WorldLabsClient";
 import { SceneRig } from "./SceneRig";
 import { WorldSplatRenderer, type LoadedWorldSplat } from "./WorldSplatRenderer";
@@ -24,6 +25,7 @@ export class WorldSpawner extends Behaviour {
     spawnedWorld: THREE.Object3D | null = null;
     private spawnedWorldCleanup: (() => Promise<void>) | null = null;
     private readonly textureLoader = new THREE.TextureLoader();
+    private readonly fbxLoader = new FBXLoader();
 
     awake(): void {
         WorldSpawner.instance = this;
@@ -54,7 +56,7 @@ export class WorldSpawner extends Behaviour {
 
         rig.root.add(visual.object);
         if (visual.fit !== false) {
-            this.fitIntoRig(visual.object, visual.bounds);
+            this.fitIntoRig(visual.object, visual.bounds, world.targetSize);
         }
         this.spawnedWorld = visual.object;
         this.spawnedWorldCleanup = visual.cleanup;
@@ -79,14 +81,14 @@ export class WorldSpawner extends Behaviour {
         this.context.domElement.removeAttribute("environment-image");
     }
 
-    private fitIntoRig(instance: THREE.Object3D, sourceBounds?: THREE.Box3): void {
+    private fitIntoRig(instance: THREE.Object3D, sourceBounds?: THREE.Box3, targetSize = TARGET_WORLD_SIZE): void {
         const initialBox = sourceBounds?.clone() ?? new THREE.Box3().setFromObject(instance);
         if (initialBox.isEmpty()) return;
 
         const initialSize = initialBox.getSize(new THREE.Vector3());
         const largestDimension = Math.max(initialSize.x, initialSize.y, initialSize.z);
         if (largestDimension > 0) {
-            const scale = TARGET_WORLD_SIZE / largestDimension;
+            const scale = targetSize / largestDimension;
             instance.scale.multiplyScalar(scale);
         }
 
@@ -98,6 +100,10 @@ export class WorldSpawner extends Behaviour {
 
     private async createVisual(world: MarbleWorldAssets): Promise<LoadedWorldSplat | null> {
         let splatError: unknown = null;
+
+        if (world.modelUrl && world.modelFormat === "fbx") {
+            return await this.createLocalFbxWorld(world);
+        }
 
         if (world.spzUrl && WorldSplatRenderer.instance) {
             try {
@@ -153,6 +159,49 @@ export class WorldSpawner extends Behaviour {
         }
 
         return null;
+    }
+
+    private async createLocalFbxWorld(world: MarbleWorldAssets): Promise<LoadedWorldSplat> {
+        const object = await this.fbxLoader.loadAsync(world.modelUrl!);
+        object.name = world.caption || "Barbie Preset World";
+        object.position.set(0, 0, 0);
+        object.rotation.set(0, world.initialYRotation ?? 0, 0);
+
+        object.traverse((child) => {
+            const mesh = child as THREE.Mesh;
+            if (!mesh.isMesh) return;
+
+            mesh.castShadow = true;
+            mesh.receiveShadow = true;
+
+            const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+            materials.forEach((material) => {
+                if (!material) return;
+                const typedMaterial = material as THREE.MeshStandardMaterial;
+                if (typedMaterial.map) {
+                    typedMaterial.map.colorSpace = THREE.SRGBColorSpace;
+                    typedMaterial.map.needsUpdate = true;
+                }
+                typedMaterial.needsUpdate = true;
+            });
+        });
+
+        return {
+            object,
+            fit: true,
+            renderer: "gaussian",
+            cleanup: async () => {
+                object.traverse((child) => {
+                    const mesh = child as THREE.Mesh;
+                    if (!mesh.isMesh) return;
+                    mesh.geometry?.dispose();
+
+                    const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+                    materials.forEach((material) => material?.dispose());
+                });
+                object.removeFromParent();
+            },
+        };
     }
 
     private async createSkybox(panoUrl: string): Promise<LoadedWorldSplat> {

@@ -1,8 +1,10 @@
 import type { MarbleWorldAssets } from "../api/WorldLabsClient";
 
 const dreamhousePanoUrl = new URL("../assets/worlds/barbie-dreamhouse-pano.jpg", import.meta.url).toString();
+const playsetFbxUrl = "/preset-worlds/barbie-playset/source/final.fbx";
+const houseFbxUrl = "/preset-worlds/barbie-house/source/BArb.fbx";
 
-export type PresetWorldId = "dreamhouse";
+export type PresetWorldId = "dreamhouse" | "playset" | "house";
 
 export type PresetWorld = {
     id: PresetWorldId;
@@ -20,6 +22,31 @@ export const PRESET_WORLDS: PresetWorld[] = [
             caption: "Barbie Dreamhouse",
             panoUrl: dreamhousePanoUrl,
             panoMode: "skybox",
+        },
+    },
+    {
+        id: "playset",
+        label: "PLAYSET PARK",
+        world: {
+            worldId: "preset-playset",
+            marbleUrl: "preset://playset",
+            caption: "Barbie Playset Park",
+            modelUrl: playsetFbxUrl,
+            modelFormat: "fbx",
+            targetSize: 1.9,
+        },
+    },
+    {
+        id: "house",
+        label: "DREAM HOUSE",
+        world: {
+            worldId: "preset-house",
+            marbleUrl: "preset://house",
+            caption: "Barbie House",
+            modelUrl: houseFbxUrl,
+            modelFormat: "fbx",
+            targetSize: 1.55,
+            initialYRotation: Math.PI,
         },
     },
 ];
