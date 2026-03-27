@@ -1,13 +1,16 @@
 export interface ScrapbookPage {
     id: string;
     imageBase64: string;
+    mimeType?: string;
+    polishedImageBase64?: string;
+    polishedMimeType?: string;
     caption: string;
     characterPrompt: string;
     timestamp: number;
 }
 
 const DATABASE_NAME = "BarbieStorybook";
-const DATABASE_VERSION = 1;
+const DATABASE_VERSION = 2;
 const STORE_NAME = "pages";
 
 let databasePromise: Promise<IDBDatabase> | null = null;

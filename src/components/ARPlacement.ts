@@ -1,5 +1,6 @@
 import { Behaviour, NeedleXRSession, type NeedleXREventArgs, findObjectOfType, WebXR } from "@needle-tools/engine";
 import * as THREE from "three";
+import { logDebug } from "../utils/DebugLog";
 
 const FALLBACK_POSITION = new THREE.Vector3();
 const EARLY_INPUT_QUEUE = -100;
@@ -100,6 +101,7 @@ export class ARPlacement extends Behaviour {
         this.surfaceDetected = false;
         this.placementConfirmed = false;
         this.reticle.visible = false;
+        logDebug("xr.enter_ar");
         this.emitSurfaceChange();
     }
 
@@ -108,6 +110,7 @@ export class ARPlacement extends Behaviour {
         this.surfaceDetected = false;
         this.placementConfirmed = false;
         this.reticle.visible = false;
+        logDebug("xr.leave_ar");
         this.emitSurfaceChange();
     }
 
@@ -146,6 +149,11 @@ export class ARPlacement extends Behaviour {
 
         this.placementConfirmed = true;
         this.reticle.visible = false;
+        logDebug("placement.confirmed", {
+            x: this.lastHitPosition.x,
+            y: this.lastHitPosition.y,
+            z: this.lastHitPosition.z,
+        });
 
         ARPlacement.events.dispatchEvent(new CustomEvent("surfaceTapped", {
             detail: this.lastHitPosition.clone(),

@@ -10,9 +10,27 @@ import { SceneRig } from "./components/SceneRig";
 import { WorldSplatRenderer } from "./components/WorldSplatRenderer";
 import { WorldSpawner } from "./components/WorldSpawner";
 import * as ScrapbookStore from "./store/ScrapbookStore";
+import { installDebugLogBridge, logDebug } from "./utils/DebugLog";
 
+installDebugLogBridge();
+window.addEventListener("error", (event) => {
+    logDebug("window.error", {
+        message: event.message,
+        filename: event.filename,
+        lineno: event.lineno,
+        colno: event.colno,
+    });
+});
+window.addEventListener("unhandledrejection", (event) => {
+    logDebug("window.unhandledrejection", {
+        reason: event.reason instanceof Error ? event.reason.message : String(event.reason),
+    });
+});
 void ScrapbookStore.init().catch((error) => {
     console.error("Failed to initialise scrapbook store:", error);
+    logDebug("store.init_failed", {
+        message: error instanceof Error ? error.message : String(error),
+    });
 });
 
 onStart((context) => {

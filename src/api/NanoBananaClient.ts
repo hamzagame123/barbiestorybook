@@ -1,7 +1,8 @@
 import { GOOGLE_API_KEY } from "../secrets";
+import { logDebug } from "../utils/DebugLog";
 
 const NANO_BANANA_PRO_MODEL = "gemini-3-pro-image-preview";
-const NANO_BANANA_FALLBACK_MODEL = "gemini-2.5-flash-image";
+const NANO_BANANA_FALLBACK_MODEL = "gemini-3.1-flash-image-preview";
 const NANO_BANANA_PRO_URL = `https://generativelanguage.googleapis.com/v1beta/models/${NANO_BANANA_PRO_MODEL}:generateContent?key=${GOOGLE_API_KEY}`;
 const NANO_BANANA_FALLBACK_URL = `https://generativelanguage.googleapis.com/v1beta/models/${NANO_BANANA_FALLBACK_MODEL}:generateContent?key=${GOOGLE_API_KEY}`;
 
@@ -77,6 +78,8 @@ function imagePartToDataUrl(part: GeminiImagePart | undefined): string | null {
 }
 
 async function requestNanoBanana(parts: Array<Record<string, unknown>>, modelUrl: string): Promise<string> {
+    const model = modelUrl.includes(NANO_BANANA_PRO_MODEL) ? NANO_BANANA_PRO_MODEL : NANO_BANANA_FALLBACK_MODEL;
+    logDebug("nano_banana.request", { model });
     const response = await fetch(modelUrl, {
         method: "POST",
         headers: getHeaders(),
@@ -86,6 +89,7 @@ async function requestNanoBanana(parts: Array<Record<string, unknown>>, modelUrl
             }],
             generationConfig: {
                 responseModalities: ["TEXT", "IMAGE"],
+                temperature: 0.1,
             },
         }),
     });
@@ -94,8 +98,14 @@ async function requestNanoBanana(parts: Array<Record<string, unknown>>, modelUrl
     const imagePart = data.candidates?.[0]?.content?.parts?.find((part) => !!imagePartToDataUrl(part));
     const dataUrl = imagePartToDataUrl(imagePart);
     if (!dataUrl) {
+        logDebug("nano_banana.invalid_response", { model });
         throw new NanoBananaClientError(NanoBananaError.InvalidResponse, "Nano Banana finished, but no image was returned.");
     }
+
+    logDebug("nano_banana.success", {
+        model,
+        mimeType: dataUrl.startsWith("data:image/png") ? "image/png" : "image/jpeg",
+    });
 
     return dataUrl;
 }
@@ -118,6 +128,10 @@ async function requestNanoBananaWithRetry(parts: Array<Record<string, unknown>>)
             }
             catch (error) {
                 lastError = error;
+                logDebug("nano_banana.retryable_error", {
+                    model: attempt.url.includes(NANO_BANANA_PRO_MODEL) ? NANO_BANANA_PRO_MODEL : NANO_BANANA_FALLBACK_MODEL,
+                    message: error instanceof Error ? error.message : String(error),
+                });
                 if (!isRetryableImageError(error) || i === attempt.delays.length - 1) break;
             }
         }
@@ -160,12 +174,27 @@ export async function polishCaptureImage(
                 },
             },
             {
-                text: `You are editing a real AR capture, not inventing a new scene.
-Preserve the exact subject identity, pose, camera angle, composition, and background layout.
-Keep the Barbie character based on: ${characterPrompt}.
-Keep the world vibe based on: ${worldPrompt || "a whimsical Barbie storybook scene"}.
-Only improve realism, polish, lighting, clarity, and minor artifacts.
-Do not change the face, hair, outfit, color palette, framing, or add new objects, people, text, or borders.`,
+                text: `This is a user-generated AR screenshot for a Barbie story app.
+You are doing a restrained cleanup pass only.
+
+Hard rules:
+- Preserve the exact composition, crop, camera angle, pose, proportions, and silhouette.
+- Preserve the exact environment and prop layout.
+- Preserve the exact color scheme and overall lighting direction.
+- Preserve the Barbie identity from this capture and the prompt: ${characterPrompt}.
+- Preserve the world/background context from: ${worldPrompt || "a whimsical Barbie storybook scene"}.
+- Do not redesign, restyle, beautify, re-illustrate, or reimagine the image.
+- Do not change the face, eyes, nose, mouth, hairstyle, body shape, dress shape, hands, or background geometry.
+- Do not add or remove objects, accessories, sparkles, borders, text, or people.
+
+Allowed edits only:
+- clean render blemishes
+- soften harsh artifacts
+- slightly improve edge quality
+- slightly improve lighting coherence
+- lightly enhance clarity while keeping the image recognizably the same shot
+
+Return the same image, just subtly cleaner.`,
             },
         ]);
     }

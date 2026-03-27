@@ -6,6 +6,7 @@ import { generateWorld, WorldLabsClientError, WorldLabsError } from "../api/Worl
 import { PRESET_CHARACTERS, getPresetCharacter, type PresetCharacterId } from "../presets/PresetCharacters";
 import { savePage } from "../store/ScrapbookStore";
 import { PRESET_WORLDS, getPresetWorld, type PresetWorldId } from "../presets/PresetWorlds";
+import { logDebug } from "../utils/DebugLog";
 import { ARPlacement } from "./ARPlacement";
 import { CharacterSpawner } from "./CharacterSpawner";
 import { SceneRig } from "./SceneRig";
@@ -207,6 +208,7 @@ export class HUD extends Behaviour {
         });
 
         this.galleryButton.addEventListener("click", () => {
+            logDebug("ui.gallery_tapped");
             ScrapbookUI.toggle();
         });
 
@@ -219,6 +221,9 @@ export class HUD extends Behaviour {
         });
 
         this.arButton.addEventListener("click", () => {
+            logDebug("ui.ar_button_tapped", {
+                active: !!NeedleXRSession.active?.isAR,
+            });
             this.handleStartAR();
         });
 
@@ -326,6 +331,10 @@ export class HUD extends Behaviour {
 
     private async handleAddToScene(): Promise<void> {
         if (this.isBusy) return;
+        logDebug("ui.add_to_scene_tapped", {
+            placementConfirmed: ARPlacement.placementConfirmed,
+            surfaceDetected: ARPlacement.surfaceDetected,
+        });
 
         if (!ARPlacement.placementConfirmed) {
             const placed = ARPlacement.instance?.confirmPlacement() ?? false;
@@ -400,6 +409,7 @@ export class HUD extends Behaviour {
 
     private async handlePresetCharacter(presetId: PresetCharacterId): Promise<void> {
         if (this.isBusy) return;
+        logDebug("ui.preset_character_tapped", { presetId });
 
         const preset = getPresetCharacter(presetId);
         if (!preset) {
@@ -450,6 +460,7 @@ export class HUD extends Behaviour {
 
     private async handleBuildWorld(): Promise<void> {
         if (this.isBusy) return;
+        logDebug("ui.build_world_tapped");
 
         const prompt = this.worldInput.value.trim();
         if (!prompt) return;
@@ -501,6 +512,7 @@ export class HUD extends Behaviour {
 
     private async handlePresetWorld(presetId: PresetWorldId): Promise<void> {
         if (this.isBusy) return;
+        logDebug("ui.preset_world_tapped", { presetId });
 
         const preset = getPresetWorld(presetId);
         if (!preset) {
@@ -599,6 +611,10 @@ export class HUD extends Behaviour {
 
     private async handleCapture(): Promise<void> {
         if (this.isBusy || !this.captureEnabled || !this.currentPrompt) return;
+        logDebug("capture.started", {
+            prompt: this.currentPrompt,
+            worldPrompt: this.currentWorldPrompt,
+        });
 
         const canvas = document.querySelector("canvas") as HTMLCanvasElement | null;
         if (!canvas) {
@@ -633,20 +649,34 @@ export class HUD extends Behaviour {
 
             this.showToast("Writing caption...");
             const caption = await generateCaption(this.currentPrompt);
-            const base64 = polishedDataUrl.replace(/^data:image\/[a-zA-Z0-9.+-]+;base64,/, "");
+            const rawMimeType = capturedDataUrl.startsWith("data:image/png") ? "image/png" : "image/jpeg";
+            const polishedMimeType = polishedDataUrl.startsWith("data:image/png") ? "image/png" : "image/jpeg";
+            const rawBase64 = capturedDataUrl.replace(/^data:image\/[a-zA-Z0-9.+-]+;base64,/, "");
+            const polishedBase64 = polishedDataUrl.replace(/^data:image\/[a-zA-Z0-9.+-]+;base64,/, "");
 
             await savePage({
                 id: crypto.randomUUID(),
-                imageBase64: base64,
+                imageBase64: rawBase64,
+                mimeType: rawMimeType,
+                polishedImageBase64: polishedBase64,
+                polishedMimeType,
                 caption,
                 characterPrompt: this.currentPrompt,
                 timestamp: Date.now(),
+            });
+            logDebug("capture.saved", {
+                rawMimeType,
+                polishedMimeType,
+                polishedChanged: polishedDataUrl !== capturedDataUrl,
             });
 
             this.showToast("Saved to your book");
             window.setTimeout(() => this.hideToast(), 2000);
         }
-        catch {
+        catch (error) {
+            logDebug("capture.failed", {
+                message: error instanceof Error ? error.message : String(error),
+            });
             this.showToast("Capture failed, try again");
             window.setTimeout(() => this.hideToast(), 2000);
         }
