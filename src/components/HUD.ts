@@ -68,6 +68,10 @@ export class HUD extends Behaviour {
     private readonly onSurfaceChange = (event: Event) => {
         const customEvent = event as CustomEvent<{ surfaceDetected: boolean; placementConfirmed: boolean }>;
         this.applySurfaceBadgeState(customEvent.detail.surfaceDetected, customEvent.detail.placementConfirmed);
+        if (customEvent.detail.placementConfirmed) {
+            this.setPanelExpanded(false);
+        }
+        this.updateActionState();
     };
 
     awake(): void {
@@ -704,7 +708,7 @@ export class HUD extends Behaviour {
         let stage = "setup";
         let kicker = "DOLL STUDIO";
         let title = "Place, pose, and capture";
-        let panelLabel = this.isPanelExpanded ? "BACK" : "MORE";
+        let panelLabel = this.isPanelExpanded ? "BACK" : "PRESETS";
 
         if (!placementConfirmed) {
             stage = "placement";
@@ -724,15 +728,13 @@ export class HUD extends Behaviour {
 
         if (this.isPanelExpanded) {
             stage = "advanced";
-            kicker = captureMode ? "SCENE" : "DOLLS";
-            title = captureMode ? "Choose a backdrop or preset scene" : "Choose a preset Barbie";
+            kicker = "PRESETS";
+            title = captureMode ? "Choose dolls, worlds, and test assets" : "Choose a preset doll or test world";
         }
 
         this.sheetKicker.textContent = kicker;
         this.sheetTitle.textContent = title;
-        if (!this.isPanelExpanded) {
-            panelLabel = !placementConfirmed ? "MORE" : hasPlacedDoll ? "SCENE" : "DOLLS";
-        }
+        if (!this.isPanelExpanded) panelLabel = "PRESETS";
         this.panelToggleButton.textContent = panelLabel;
         this.panelToggleButton.hidden = !placementConfirmed;
         this.panelToggleButton.disabled = this.isBusy;
@@ -749,8 +751,8 @@ export class HUD extends Behaviour {
 
         this.captureButton.textContent = captureMode ? "CAPTURE PAGE" : "CAPTURE";
 
-        const showCharacterTools = this.isPanelExpanded && placementConfirmed && !captureMode;
-        const showSceneTools = this.isPanelExpanded && placementConfirmed && captureMode;
+        const showCharacterTools = this.isPanelExpanded && placementConfirmed;
+        const showSceneTools = this.isPanelExpanded && placementConfirmed;
 
         this.promptRow.classList.toggle("is-hidden", scanningOnly || captureMode || compactArMode || this.isPanelExpanded);
         this.actionRow.classList.toggle("is-capture-mode", captureMode);
@@ -820,7 +822,7 @@ export class HUD extends Behaviour {
 
             #hud-top {
                 position: fixed;
-                top: calc(env(safe-area-inset-top, 0px) + 12px);
+                top: calc(env(safe-area-inset-top, 0px) + 4px);
                 left: 12px;
                 right: 12px;
                 display: flex;
@@ -1355,6 +1357,7 @@ export class HUD extends Behaviour {
             @media (max-width: 520px) {
                 #hud-top {
                     gap: 8px;
+                    top: calc(env(safe-area-inset-top, 0px) + 2px);
                 }
 
                 #hud-bottom {
