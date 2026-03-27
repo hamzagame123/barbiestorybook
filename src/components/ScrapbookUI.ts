@@ -9,6 +9,13 @@ const TAPE_COLORS = [
     "rgba(255,180,220,0.8)",
 ];
 
+function makeImageDataUrl(page: ScrapbookPage, usePolished = false): string {
+    if (usePolished && page.polishedImageBase64) {
+        return `data:${page.polishedMimeType || page.mimeType || "image/jpeg"};base64,${page.polishedImageBase64}`;
+    }
+    return `data:${page.mimeType || "image/jpeg"};base64,${page.imageBase64}`;
+}
+
 export class ScrapbookUI extends Behaviour {
     static instance: ScrapbookUI | null = null;
 
@@ -39,6 +46,7 @@ export class ScrapbookUI extends Behaviour {
 
     async toggle(): Promise<void> {
         const shouldShow = this.overlay.hidden;
+        if (!shouldShow) this.closeViewer();
         this.overlay.hidden = !shouldShow;
         const overlayHost = this.getOverlayHost();
         overlayHost.style.overflow = shouldShow ? "hidden" : "";
@@ -51,7 +59,10 @@ export class ScrapbookUI extends Behaviour {
         try {
             this.renderPages(await getAllPages());
         }
-        catch {
+        catch (error) {
+            logDebug("scrapbook.load_failed", {
+                message: error instanceof Error ? error.message : String(error),
+            });
             this.renderPages([]);
         }
     }
@@ -71,9 +82,15 @@ export class ScrapbookUI extends Behaviour {
             tape.style.background = TAPE_COLORS[index % TAPE_COLORS.length];
 
             const image = document.createElement("img");
-            image.src = `data:${page.mimeType || "image/jpeg"};base64,${page.imageBase64}`;
+            image.src = makeImageDataUrl(page);
             image.alt = page.caption;
             image.loading = "lazy";
+            image.decoding = "async";
+            image.addEventListener("error", () => {
+                if (page.polishedImageBase64) {
+                    image.src = makeImageDataUrl(page, true);
+                }
+            });
 
             const caption = document.createElement("div");
             caption.className = "card-caption";
@@ -91,8 +108,14 @@ export class ScrapbookUI extends Behaviour {
     private openViewer(page: ScrapbookPage): void {
         logDebug("scrapbook.viewer_open", { id: page.id });
         this.viewer.hidden = false;
-        this.viewerImage.src = `data:${page.mimeType || "image/jpeg"};base64,${page.imageBase64}`;
+        this.viewerImage.src = makeImageDataUrl(page);
         this.viewerImage.alt = page.caption;
+        this.viewerImage.decoding = "async";
+        this.viewerImage.onerror = () => {
+            if (page.polishedImageBase64) {
+                this.viewerImage.src = makeImageDataUrl(page, true);
+            }
+        };
         this.viewerCaption.textContent = `${page.caption} • ${page.characterPrompt}`;
         this.overlay.style.overflow = "hidden";
     }
@@ -100,6 +123,7 @@ export class ScrapbookUI extends Behaviour {
     private closeViewer(): void {
         logDebug("scrapbook.viewer_close");
         this.viewer.hidden = true;
+        this.viewerImage.onerror = null;
         this.viewerImage.removeAttribute("src");
         this.viewerCaption.textContent = "";
         this.overlay.style.overflowY = "auto";
@@ -146,16 +170,23 @@ export class ScrapbookUI extends Behaviour {
         this.viewerCaption = overlay.querySelector("#scrapbook-viewer-caption") as HTMLDivElement;
 
         const closeButton = overlay.querySelector("#scrapbook-close") as HTMLButtonElement;
-        closeButton.addEventListener("click", () => void this.toggle());
+        closeButton.addEventListener("click", (event) => {
+            event.stopPropagation();
+            void this.toggle();
+        });
 
         this.exportLogsButton = overlay.querySelector("#scrapbook-export-logs") as HTMLButtonElement;
-        this.exportLogsButton.addEventListener("click", () => {
+        this.exportLogsButton.addEventListener("click", (event) => {
+            event.stopPropagation();
             logDebug("scrapbook.export_logs");
             exportDebugLogs();
         });
 
         const viewerCloseButton = overlay.querySelector("#scrapbook-viewer-close") as HTMLButtonElement;
-        viewerCloseButton.addEventListener("click", () => this.closeViewer());
+        viewerCloseButton.addEventListener("click", (event) => {
+            event.stopPropagation();
+            this.closeViewer();
+        });
 
         this.viewer.addEventListener("click", (event) => {
             if (event.target === this.viewer) this.closeViewer();
@@ -178,8 +209,11 @@ export class ScrapbookUI extends Behaviour {
 
         const overlayRoot = document.createElement("div");
         overlayRoot.id = "barbie-overlay-root";
-        overlayRoot.className = "desktop ar";
         overlayRoot.dataset.barbieOverlay = "true";
+        overlayRoot.style.position = "fixed";
+        overlayRoot.style.inset = "0";
+        overlayRoot.style.zIndex = "9999";
+        overlayRoot.style.pointerEvents = "none";
         host.append(overlayRoot);
         return overlayRoot;
     }
@@ -193,13 +227,15 @@ export class ScrapbookUI extends Behaviour {
             #scrapbook-overlay {
                 position: fixed;
                 inset: 0;
-                background: rgba(255, 246, 240, 0.985);
+                background: rgba(255, 246, 240, 0.992);
                 z-index: 1000;
                 overflow-y: auto;
                 font-family: "Fraunces", serif;
                 color: #3a1a2a;
                 opacity: 1;
                 isolation: isolate;
+                pointer-events: auto;
+                touch-action: pan-y;
             }
 
             #scrapbook-header {
@@ -208,11 +244,10 @@ export class ScrapbookUI extends Behaviour {
                 display: flex;
                 justify-content: space-between;
                 align-items: center;
-                padding: calc(env(safe-area-inset-top, 0px) + 16px) 24px 20px;
+                padding: calc(env(safe-area-inset-top, 0px) + 20px) 20px 20px;
                 background: rgba(255, 246, 240, 0.995);
                 border-bottom: 1px solid rgba(200,100,130,0.2);
                 z-index: 2;
-                opacity: 1;
             }
 
             #scrapbook-header-actions {
@@ -228,16 +263,26 @@ export class ScrapbookUI extends Behaviour {
             }
 
             #scrapbook-close,
-            #scrapbook-export-logs {
-                min-width: 44px;
-                min-height: 44px;
+            #scrapbook-export-logs,
+            #scrapbook-viewer-close {
+                min-width: 48px;
+                min-height: 48px;
                 padding: 0 14px;
                 border: 1px solid rgba(192,24,90,0.14);
-                background: rgba(255,255,255,0.82);
+                background: rgba(255,255,255,0.92);
                 color: #C0185A;
-                font-size: 15px;
                 border-radius: 999px;
                 cursor: pointer;
+                touch-action: manipulation;
+            }
+
+            #scrapbook-export-logs {
+                font-size: 14px;
+            }
+
+            #scrapbook-close,
+            #scrapbook-viewer-close {
+                font-size: 20px;
             }
 
             #scrapbook-grid {
@@ -245,7 +290,6 @@ export class ScrapbookUI extends Behaviour {
                 grid-template-columns: repeat(2, minmax(0, 1fr));
                 gap: 16px;
                 padding: 20px;
-                opacity: 1;
             }
 
             #scrapbook-empty {
@@ -257,7 +301,7 @@ export class ScrapbookUI extends Behaviour {
             }
 
             .page-card {
-                background: white;
+                background: #ffffff;
                 border-radius: 14px;
                 box-shadow: 0 4px 20px rgba(0,0,0,0.08);
                 overflow: hidden;
@@ -265,7 +309,6 @@ export class ScrapbookUI extends Behaviour {
                 transition: transform 0.2s ease;
                 display: flex;
                 flex-direction: column;
-                opacity: 1;
             }
 
             .page-card img {
@@ -309,14 +352,14 @@ export class ScrapbookUI extends Behaviour {
                 position: fixed;
                 inset: 0;
                 z-index: 1100;
-                background: rgba(255, 246, 240, 0.985);
+                background: rgba(255, 246, 240, 0.992);
                 display: flex;
                 flex-direction: column;
                 align-items: center;
                 justify-content: center;
                 gap: 16px;
                 padding: calc(env(safe-area-inset-top, 0px) + 24px) 24px calc(env(safe-area-inset-bottom, 0px) + 24px);
-                opacity: 1;
+                pointer-events: auto;
             }
 
             #scrapbook-viewer-image {
@@ -338,16 +381,8 @@ export class ScrapbookUI extends Behaviour {
 
             #scrapbook-viewer-close {
                 position: absolute;
-                top: calc(env(safe-area-inset-top, 0px) + 16px);
+                top: calc(env(safe-area-inset-top, 0px) + 20px);
                 right: 16px;
-                min-width: 44px;
-                min-height: 44px;
-                border: none;
-                background: rgba(200,24,90,0.08);
-                color: #C0185A;
-                border-radius: 999px;
-                font-size: 20px;
-                cursor: pointer;
             }
 
             @media (max-width: 480px) {
