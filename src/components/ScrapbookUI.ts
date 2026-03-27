@@ -224,6 +224,12 @@ export class ScrapbookUI extends Behaviour {
         const style = document.createElement("style");
         style.id = "barbie-scrapbook-styles";
         style.textContent = `
+            #scrapbook-overlay[hidden],
+            #scrapbook-viewer[hidden] {
+                display: none !important;
+                pointer-events: none !important;
+            }
+
             #scrapbook-overlay {
                 position: fixed;
                 inset: 0;
