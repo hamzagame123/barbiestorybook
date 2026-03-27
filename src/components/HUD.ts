@@ -48,6 +48,8 @@ export class HUD extends Behaviour {
     private worldInput!: HTMLInputElement;
     private panelToggleButton!: HTMLButtonElement;
     private advancedPanel!: HTMLDivElement;
+    private characterPresets!: HTMLDivElement;
+    private worldBuilder!: HTMLDivElement;
     private presetCharacterButtons: HTMLButtonElement[] = [];
     private presetWorldButtons: HTMLButtonElement[] = [];
     private speakButton!: HTMLButtonElement;
@@ -119,6 +121,11 @@ export class HUD extends Behaviour {
                         <div id="hud-sheet-kicker">DOLL STUDIO</div>
                         <div id="hud-sheet-title">Place, pose, and capture</div>
                     </div>
+                    <div id="hud-stage-rail" aria-hidden="true">
+                        <span class="hud-stage-dot" data-stage-dot="placement">SCAN</span>
+                        <span class="hud-stage-dot" data-stage-dot="doll">DOLL</span>
+                        <span class="hud-stage-dot" data-stage-dot="capture">BOOK</span>
+                    </div>
                     <div id="hud-sheet-actions">
                         <button id="panel-toggle-btn" type="button" aria-expanded="false">MORE</button>
                     </div>
@@ -170,8 +177,10 @@ export class HUD extends Behaviour {
         this.actionRow = root.querySelector("#action-row") as HTMLDivElement;
         this.panelToggleButton = root.querySelector("#panel-toggle-btn") as HTMLButtonElement;
         this.advancedPanel = root.querySelector("#hud-advanced") as HTMLDivElement;
+        this.characterPresets = root.querySelector("#character-presets") as HTMLDivElement;
         this.presetCharacterButtons = Array.from(root.querySelectorAll(".character-preset-btn")) as HTMLButtonElement[];
         this.worldInput = root.querySelector("#world-input") as HTMLInputElement;
+        this.worldBuilder = root.querySelector("#world-builder") as HTMLDivElement;
         this.presetWorldButtons = Array.from(root.querySelectorAll(".world-preset-btn")) as HTMLButtonElement[];
         this.speakButton = root.querySelector("#speak-btn") as HTMLButtonElement;
         this.addButton = root.querySelector("#add-btn") as HTMLButtonElement;
@@ -314,11 +323,24 @@ export class HUD extends Behaviour {
     private async handleAddToScene(): Promise<void> {
         if (this.isBusy) return;
 
-        const prompt = this.promptInput.value.trim();
-        if (!prompt) return;
-
         if (!ARPlacement.placementConfirmed) {
-            this.showToast("Tap a surface to place first");
+            const placed = ARPlacement.instance?.confirmPlacement() ?? false;
+            if (placed) {
+                this.showToast("Scene placed");
+                this.setPanelExpanded(false);
+                this.updateHudMode();
+                window.setTimeout(() => this.hideToast(), 1100);
+            }
+            else {
+                this.showToast("Move iPhone until the pink ring appears");
+                window.setTimeout(() => this.hideToast(), 1600);
+            }
+            return;
+        }
+
+        const prompt = this.promptInput.value.trim();
+        if (!prompt) {
+            this.showToast("Describe Barbie first");
             window.setTimeout(() => this.hideToast(), 1600);
             return;
         }
@@ -645,7 +667,9 @@ export class HUD extends Behaviour {
 
     private updateActionState(): void {
         this.magicButton.disabled = this.isBusy;
-        this.addButton.disabled = this.isBusy || this.promptInput.value.trim().length === 0;
+        this.addButton.disabled = !ARPlacement.placementConfirmed
+            ? this.isBusy || !ARPlacement.surfaceDetected
+            : this.isBusy || this.promptInput.value.trim().length === 0;
         this.buildWorldButton.disabled = this.isBusy || this.worldInput.value.trim().length === 0;
         this.presetCharacterButtons.forEach((button) => {
             button.disabled = this.isBusy;
@@ -665,8 +689,8 @@ export class HUD extends Behaviour {
         this.isPanelExpanded = expanded;
         this.bottomSheet.classList.toggle("is-expanded", expanded);
         this.advancedPanel.setAttribute("aria-hidden", String(!expanded));
-        this.panelToggleButton.textContent = expanded ? "LESS" : "MORE";
         this.panelToggleButton.setAttribute("aria-expanded", String(expanded));
+        this.updateHudMode();
     }
 
     private updateHudMode(): void {
@@ -675,44 +699,84 @@ export class HUD extends Behaviour {
         const captureMode = this.captureEnabled && hasPlacedDoll;
         const compactArMode = isArSession && !this.isPanelExpanded;
         const placementConfirmed = ARPlacement.placementConfirmed;
+        const scanningOnly = isArSession && !placementConfirmed;
 
         let stage = "setup";
         let kicker = "DOLL STUDIO";
         let title = "Place, pose, and capture";
+        let panelLabel = this.isPanelExpanded ? "BACK" : "MORE";
 
         if (!placementConfirmed) {
             stage = "placement";
             kicker = "SCAN";
-            title = "Find a surface to place your scene";
+            title = ARPlacement.surfaceDetected ? "Tap to place your scene" : "Move iPhone to start";
         }
         else if (!hasPlacedDoll) {
             stage = "doll";
             kicker = "PLACE";
-            title = "Add a doll to start composing";
+            title = this.isPanelExpanded ? "Choose a preset doll or world" : "Add a doll to start composing";
         }
         else if (captureMode) {
             stage = "capture";
             kicker = "CAPTURE";
-            title = "Drag, pinch, and twist to frame the shot";
+            title = this.isPanelExpanded ? "Add presets, then jump back to capture" : "Drag, pinch, and twist to frame the shot";
         }
 
         if (this.isPanelExpanded) {
             stage = "advanced";
-            kicker = "TOOLS";
-            title = "Presets and world controls";
+            kicker = captureMode ? "SCENE" : "DOLLS";
+            title = captureMode ? "Choose a backdrop or preset scene" : "Choose a preset Barbie";
         }
 
         this.sheetKicker.textContent = kicker;
         this.sheetTitle.textContent = title;
+        if (!this.isPanelExpanded) {
+            panelLabel = !placementConfirmed ? "MORE" : hasPlacedDoll ? "SCENE" : "DOLLS";
+        }
+        this.panelToggleButton.textContent = panelLabel;
+        this.panelToggleButton.hidden = !placementConfirmed;
+        this.panelToggleButton.disabled = this.isBusy;
 
-        this.promptRow.classList.toggle("is-hidden", captureMode || compactArMode);
+        if (!placementConfirmed) {
+            this.addButton.textContent = ARPlacement.surfaceDetected ? "TAP TO PLACE" : "SCAN SURFACE";
+        }
+        else if (captureMode) {
+            this.addButton.textContent = "ADD ANOTHER DOLL";
+        }
+        else {
+            this.addButton.textContent = "ADD DOLL";
+        }
+
+        this.captureButton.textContent = captureMode ? "CAPTURE PAGE" : "CAPTURE";
+
+        const showCharacterTools = this.isPanelExpanded && placementConfirmed && !captureMode;
+        const showSceneTools = this.isPanelExpanded && placementConfirmed && captureMode;
+
+        this.promptRow.classList.toggle("is-hidden", scanningOnly || captureMode || compactArMode || this.isPanelExpanded);
         this.actionRow.classList.toggle("is-capture-mode", captureMode);
         this.addButton.classList.toggle("is-hidden", captureMode);
         this.captureButton.classList.toggle("is-hidden", !captureMode);
+        this.characterPresets.hidden = !showCharacterTools;
+        this.magicButton.hidden = !showCharacterTools;
+        this.worldBuilder.hidden = !showSceneTools;
         this.bottomSheet.classList.toggle("is-ar-session", isArSession);
         this.bottomSheet.classList.toggle("is-compact", compactArMode);
         this.bottomSheet.classList.toggle("is-capture-mode", captureMode);
+        this.bottomSheet.classList.toggle("is-placement-stage", scanningOnly);
+        this.bottomSheet.classList.toggle("is-tool-stage", this.isPanelExpanded);
+        this.bottomSheet.classList.toggle("is-subpanel", this.isPanelExpanded);
         this.bottomSheet.dataset.stage = stage;
+
+        Array.from(this.root.querySelectorAll<HTMLElement>(".hud-stage-dot")).forEach((dot) => {
+            const dotStage = dot.dataset.stageDot;
+            const active =
+                (stage === "placement" && dotStage === "placement") ||
+                ((stage === "doll" || stage === "advanced") && dotStage === "doll") ||
+                (stage === "capture" && dotStage === "capture");
+            dot.classList.toggle("is-active", active);
+            dot.classList.toggle("is-complete", placementConfirmed && dotStage === "placement" && stage !== "placement");
+            dot.classList.toggle("is-complete", hasPlacedDoll && dotStage === "doll" && stage === "capture");
+        });
     }
 
     private showToast(message: string): void {
@@ -880,6 +944,11 @@ export class HUD extends Behaviour {
                 box-shadow: 0 10px 24px rgba(0, 0, 0, 0.24);
             }
 
+            #hud-bottom.is-subpanel {
+                width: min(calc(100vw - 24px), 520px);
+                gap: 10px;
+            }
+
             #hud-sheet-header,
             #hud-sheet-actions,
             #prompt-row,
@@ -895,6 +964,15 @@ export class HUD extends Behaviour {
                 gap: 12px;
             }
 
+            #hud-stage-rail {
+                display: flex;
+                align-items: center;
+                gap: 6px;
+                margin-left: auto;
+                margin-right: 4px;
+                transition: opacity 0.22s ease, transform 0.24s ease;
+            }
+
             #hud-bottom.is-ar-session.is-compact #hud-sheet-header {
                 align-items: center;
                 gap: 8px;
@@ -904,7 +982,7 @@ export class HUD extends Behaviour {
                 display: flex;
                 flex-direction: column;
                 gap: 4px;
-                transition: opacity 0.22s ease, transform 0.22s ease;
+                transition: opacity 0.22s ease, transform 0.22s ease, filter 0.22s ease;
             }
 
             #hud-bottom.is-ar-session.is-compact #hud-sheet-copy {
@@ -919,8 +997,47 @@ export class HUD extends Behaviour {
                 justify-content: flex-end;
             }
 
+            #hud-bottom.is-ar-session.is-compact #hud-stage-rail {
+                opacity: 1;
+                transform: translateY(0);
+            }
+
             #hud-bottom.is-ar-session.is-compact #panel-toggle-btn {
                 min-width: 92px;
+            }
+
+            .hud-stage-dot {
+                min-height: 30px;
+                padding: 0 10px;
+                border-radius: 999px;
+                border: 1px solid rgba(255,255,255,0.08);
+                background: rgba(255,255,255,0.04);
+                color: rgba(255,255,255,0.45);
+                font-size: 10px;
+                letter-spacing: 1.4px;
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                transition:
+                    background 0.24s ease,
+                    border-color 0.24s ease,
+                    color 0.24s ease,
+                    transform 0.24s ease,
+                    box-shadow 0.24s ease;
+            }
+
+            .hud-stage-dot.is-active {
+                background: rgba(255,36,114,0.22);
+                border-color: rgba(255,36,114,0.35);
+                color: #fff1f7;
+                transform: translateY(-1px);
+                box-shadow: 0 8px 20px rgba(255, 36, 114, 0.18);
+            }
+
+            .hud-stage-dot.is-complete:not(.is-active) {
+                background: rgba(74,222,128,0.12);
+                border-color: rgba(74,222,128,0.24);
+                color: rgba(214,255,231,0.9);
             }
 
             #hud-sheet-kicker,
@@ -982,6 +1099,38 @@ export class HUD extends Behaviour {
                 gap: 8px;
             }
 
+            #hud-bottom.is-subpanel #hud-primary {
+                max-height: 0;
+                opacity: 0;
+                overflow: hidden;
+                pointer-events: none;
+                transform: translateY(8px);
+                margin: 0;
+            }
+
+            #hud-bottom.is-placement-stage {
+                width: min(calc(100vw - 24px), 420px);
+                padding-top: 12px;
+                padding-bottom: 12px;
+            }
+
+            #hud-bottom.is-placement-stage #hud-primary {
+                gap: 6px;
+            }
+
+            #hud-bottom.is-placement-stage #action-row {
+                justify-content: stretch;
+            }
+
+            #hud-bottom.is-placement-stage #add-btn {
+                width: 100%;
+                flex: 1 1 100%;
+            }
+
+            #hud-bottom.is-tool-stage #hud-sheet-copy {
+                filter: saturate(1.15);
+            }
+
             #hud-primary > *,
             #hud-advanced > * {
                 transition:
@@ -1029,6 +1178,10 @@ export class HUD extends Behaviour {
                 border-top-color: rgba(255,255,255,0.08);
                 transform: translateY(0);
                 pointer-events: auto;
+            }
+
+            #hud-bottom.is-subpanel #hud-advanced {
+                max-height: 460px;
             }
 
             #character-preset-row,
@@ -1091,6 +1244,12 @@ export class HUD extends Behaviour {
                 border: 1px solid rgba(255,36,114,0.4);
                 background: rgba(255,36,114,0.18);
                 color: #FFADD0;
+                transition:
+                    opacity 0.22s ease,
+                    transform 0.24s ease,
+                    background 0.22s ease,
+                    border-color 0.22s ease,
+                    color 0.22s ease;
             }
 
             #prompt-row.is-hidden,
@@ -1128,10 +1287,27 @@ export class HUD extends Behaviour {
                 background: white;
                 color: #0C0008;
                 font-weight: 600;
+                transition:
+                    opacity 0.22s ease,
+                    transform 0.24s ease,
+                    background 0.22s ease,
+                    color 0.22s ease,
+                    box-shadow 0.22s ease;
             }
 
             #world-btn {
                 width: 100%;
+            }
+
+            #hud-bottom[data-stage="placement"] #add-btn:not(:disabled) {
+                background: linear-gradient(135deg, rgba(255,36,114,0.2), rgba(255,214,231,0.16));
+                border-color: rgba(255,214,231,0.28);
+                color: #fff1f7;
+            }
+
+            #hud-bottom[data-stage="capture"] #capture-btn:not(:disabled) {
+                box-shadow: 0 14px 32px rgba(255, 255, 255, 0.18);
+                transform: translateY(-1px);
             }
 
             #magic-btn:disabled,

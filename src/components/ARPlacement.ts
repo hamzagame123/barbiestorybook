@@ -141,6 +141,19 @@ export class ARPlacement extends Behaviour {
         this.emitSurfaceChange();
     }
 
+    confirmPlacement(): boolean {
+        if (!this.surfaceDetected || this.placementConfirmed) return false;
+
+        this.placementConfirmed = true;
+        this.reticle.visible = false;
+
+        ARPlacement.events.dispatchEvent(new CustomEvent("surfaceTapped", {
+            detail: this.lastHitPosition.clone(),
+        }));
+        this.emitSurfaceChange();
+        return true;
+    }
+
     private emitSurfaceChange(): void {
         const detail: SurfaceChangeDetail = {
             surfaceDetected: this.surfaceDetected,
