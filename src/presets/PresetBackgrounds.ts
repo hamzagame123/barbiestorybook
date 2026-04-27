@@ -1,9 +1,10 @@
-const dreamhouseHdriUrl = new URL("../assets/worlds/barbie-dreamhouse-pano.jpg", import.meta.url).toString();
-const dollhouseSalonHdriUrl = new URL("../assets/worlds/dollhouse-salon.jpg", import.meta.url).toString();
-const dollhouseMusicRoomHdriUrl = new URL("../assets/worlds/dollhouse-music-room.jpg", import.meta.url).toString();
-const dollhousePartyGardenHdriUrl = new URL("../assets/worlds/dollhouse-party-garden.jpg", import.meta.url).toString();
+const glamVanitySunsetUrl = new URL("../assets/worlds/glam-vanity-sunset.jpg", import.meta.url).toString();
+const dreamhouseLobbyUrl = new URL("../assets/worlds/dreamhouse-lobby.jpg", import.meta.url).toString();
+const rooftopPoolLoungeUrl = new URL("../assets/worlds/rooftop-pool-lounge.jpg", import.meta.url).toString();
+const palaceGrandHallUrl = new URL("../assets/worlds/palace-grand-hall.jpg", import.meta.url).toString();
+const beachResortPoolUrl = new URL("../assets/worlds/beach-resort-pool.jpg", import.meta.url).toString();
 
-export type PresetBackgroundId = "dreamhouse" | "salon" | "music-room" | "party-garden";
+export type PresetBackgroundId = "glam-vanity" | "dreamhouse-lobby" | "rooftop-pool" | "palace-hall" | "beach-resort";
 
 export type PresetBackground = {
     id: PresetBackgroundId;
@@ -15,32 +16,39 @@ export type PresetBackground = {
 
 export const PRESET_BACKGROUNDS: PresetBackground[] = [
     {
-        id: "dreamhouse",
-        label: "DREAMHOUSE PANO",
-        title: "Dreamhouse Pano",
-        panoUrl: dreamhouseHdriUrl,
-        previewUrl: dreamhouseHdriUrl,
+        id: "glam-vanity",
+        label: "GLAM VANITY",
+        title: "Glam Vanity Sunset",
+        panoUrl: glamVanitySunsetUrl,
+        previewUrl: glamVanitySunsetUrl,
     },
     {
-        id: "salon",
-        label: "DOLLHOUSE SALON",
-        title: "Dollhouse Salon",
-        panoUrl: dollhouseSalonHdriUrl,
-        previewUrl: dollhouseSalonHdriUrl,
+        id: "dreamhouse-lobby",
+        label: "DREAMHOUSE LOBBY",
+        title: "Dreamhouse Lobby",
+        panoUrl: dreamhouseLobbyUrl,
+        previewUrl: dreamhouseLobbyUrl,
     },
     {
-        id: "music-room",
-        label: "MUSIC ROOM",
-        title: "Music Room",
-        panoUrl: dollhouseMusicRoomHdriUrl,
-        previewUrl: dollhouseMusicRoomHdriUrl,
+        id: "rooftop-pool",
+        label: "ROOFTOP POOL",
+        title: "Rooftop Pool Lounge",
+        panoUrl: rooftopPoolLoungeUrl,
+        previewUrl: rooftopPoolLoungeUrl,
     },
     {
-        id: "party-garden",
-        label: "PARTY GARDEN",
-        title: "Party Garden",
-        panoUrl: dollhousePartyGardenHdriUrl,
-        previewUrl: dollhousePartyGardenHdriUrl,
+        id: "palace-hall",
+        label: "PALACE HALL",
+        title: "Palace Grand Hall",
+        panoUrl: palaceGrandHallUrl,
+        previewUrl: palaceGrandHallUrl,
+    },
+    {
+        id: "beach-resort",
+        label: "BEACH RESORT",
+        title: "Beach Resort Pool",
+        panoUrl: beachResortPoolUrl,
+        previewUrl: beachResortPoolUrl,
     },
 ];
 
