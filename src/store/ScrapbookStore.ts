@@ -7,6 +7,9 @@ export interface ScrapbookPage {
     caption: string;
     characterPrompt: string;
     timestamp: number;
+    backgroundId?: string;
+    frameId?: string;
+    stickerPairId?: string;
 }
 
 const DATABASE_NAME = "BarbieStorybook";

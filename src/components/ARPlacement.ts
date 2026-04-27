@@ -21,6 +21,7 @@ type SurfaceChangeDetail = {
 export class ARPlacement extends Behaviour {
     static instance: ARPlacement | null = null;
     static events = new EventTarget();
+    private static suppressUntil = 0;
 
     static get surfaceDetected(): boolean {
         return ARPlacement.instance?.surfaceDetected ?? false;
@@ -52,6 +53,7 @@ export class ARPlacement extends Behaviour {
     );
 
     private readonly tapHandler = (event: PlacementInputEvent) => {
+        if (ARPlacement.isSuppressed()) return;
         const activeSession = NeedleXRSession.active;
         if (!activeSession?.isAR || !this.surfaceDetected || this.placementConfirmed) return;
         if (event.used) return;
@@ -168,5 +170,13 @@ export class ARPlacement extends Behaviour {
             placementConfirmed: this.placementConfirmed,
         };
         ARPlacement.events.dispatchEvent(new CustomEvent("surfacechange", { detail }));
+    }
+
+    static suppressInputs(durationMs: number): void {
+        ARPlacement.suppressUntil = performance.now() + Math.max(0, durationMs);
+    }
+
+    private static isSuppressed(): boolean {
+        return performance.now() < ARPlacement.suppressUntil;
     }
 }

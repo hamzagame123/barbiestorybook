@@ -1,4 +1,4 @@
-import { AssetReference, Behaviour, destroy } from "@needle-tools/engine";
+import { AssetReference, Behaviour } from "@needle-tools/engine";
 import * as THREE from "three";
 import { SceneRig } from "./SceneRig";
 
@@ -7,6 +7,7 @@ const POP_DURATION_MS = 400;
 
 type SpawnCharacterOptions = {
     initialYRotation?: number;
+    worldYRotation?: number;
 };
 
 export class CharacterSpawner extends Behaviour {
@@ -26,8 +27,6 @@ export class CharacterSpawner extends Behaviour {
     }
 
     async spawnAt(glbUrl: string, position: THREE.Vector3, options: SpawnCharacterOptions = {}): Promise<void> {
-        this.clearScene();
-
         const rig = SceneRig.instance;
         if (!rig) {
             throw new Error("Scene rig is not ready.");
@@ -41,11 +40,13 @@ export class CharacterSpawner extends Behaviour {
             throw new Error("Failed to load generated character.");
         }
 
-        rig.placeAt(position, true);
+        if (!rig.hasContent()) {
+            rig.placeAt(position);
+        }
         instance.position.set(0, 0, 0);
         instance.rotation.set(0, options.initialYRotation ?? 0, 0);
         instance.scale.setScalar(0);
-        rig.root.add(instance);
+        rig.addItem("toy", instance, position, options.worldYRotation ?? 0);
         this.spawnedObject = instance;
 
         const startedAt = performance.now();
@@ -65,8 +66,7 @@ export class CharacterSpawner extends Behaviour {
     }
 
     clearScene(): void {
-        if (!this.spawnedObject) return;
-        destroy(this.spawnedObject);
+        SceneRig.instance?.clearSlot("toy");
         this.spawnedObject = null;
     }
 

@@ -1,0 +1,32 @@
+{
+  "defaultExtension": ".png",
+  "makeTransparentFromCorners": false,
+  "chromaKey": [0, 255, 0],
+  "transparencyTolerance": 28,
+  "greenScreen": true,
+  "greenScreenMinGreen": 135,
+  "greenScreenDominanceRatio": 1.18,
+  "grid": {
+    "columns": 4,
+    "rows": 4,
+    "margin": 24
+  },
+  "assets": [
+    { "name": "logo-wordmark", "row": 0, "col": 0 },
+    { "name": "logo-badge", "row": 0, "col": 1 },
+    { "name": "logo-seal", "row": 0, "col": 2 },
+    { "name": "glimmer-idle", "row": 0, "col": 3 },
+    { "name": "button-primary-pill", "row": 1, "col": 0 },
+    { "name": "button-secondary-pill", "row": 1, "col": 1 },
+    { "name": "button-icon-heart", "row": 1, "col": 2 },
+    { "name": "button-icon-star", "row": 1, "col": 3 },
+    { "name": "speech-bubble-rounded", "row": 2, "col": 0 },
+    { "name": "speech-bubble-comic", "row": 2, "col": 1 },
+    { "name": "speech-bubble-cloud", "row": 2, "col": 2 },
+    { "name": "glimmer-talking", "row": 2, "col": 3 },
+    { "name": "panel-library-card", "row": 3, "col": 0 },
+    { "name": "panel-scrapbook-card", "row": 3, "col": 1 },
+    { "name": "motif-stars-ribbon", "row": 3, "col": 2 },
+    { "name": "glimmer-listening", "row": 3, "col": 3 }
+  ]
+}

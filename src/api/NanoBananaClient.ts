@@ -1,10 +1,9 @@
-import { GOOGLE_API_KEY } from "../secrets";
+import { fal } from "@fal-ai/client";
+import { FAL_API_KEY } from "../secrets";
 import { logDebug } from "../utils/DebugLog";
 
-const NANO_BANANA_PRO_MODEL = "gemini-3-pro-image-preview";
-const NANO_BANANA_FALLBACK_MODEL = "gemini-3.1-flash-image-preview";
-const NANO_BANANA_PRO_URL = `https://generativelanguage.googleapis.com/v1beta/models/${NANO_BANANA_PRO_MODEL}:generateContent?key=${GOOGLE_API_KEY}`;
-const NANO_BANANA_FALLBACK_URL = `https://generativelanguage.googleapis.com/v1beta/models/${NANO_BANANA_FALLBACK_MODEL}:generateContent?key=${GOOGLE_API_KEY}`;
+const NANO_BANANA_PRO_MODEL = "fal-ai/nano-banana-pro";
+const NANO_BANANA_PRO_EDIT_MODEL = "fal-ai/nano-banana-pro/edit";
 
 export enum NanoBananaError {
     APIError = "api-error",
@@ -18,136 +17,110 @@ export class NanoBananaClientError extends Error {
     }
 }
 
-type InlineData = {
-    mimeType?: string;
-    mime_type?: string;
-    data?: string;
+type FalImage = {
+    url?: string;
 };
 
-type GeminiImagePart = {
-    text?: string;
-    inlineData?: InlineData;
-    inline_data?: InlineData;
+type FalImageResponse = {
+    images?: FalImage[];
+    description?: string;
 };
 
-type GeminiImageResponse = {
-    candidates?: Array<{
-        content?: {
-            parts?: GeminiImagePart[];
-        };
-    }>;
-    error?: {
-        message?: string;
-    };
-};
+type FalImageResult = {
+    data?: FalImageResponse;
+} & FalImageResponse;
 
-function getHeaders(): HeadersInit {
-    return {
-        "Content-Type": "application/json",
-    };
+let falConfigured = false;
+
+function ensureFalConfigured(): void {
+    if (falConfigured) return;
+
+    fal.config({
+        credentials: FAL_API_KEY,
+        suppressLocalCredentialsWarning: true,
+    });
+    falConfigured = true;
 }
 
-async function readJson<T>(response: Response): Promise<T> {
-    const body = await response.json().catch(() => null) as GeminiImageResponse | null;
+function getPayload(result: FalImageResult): FalImageResponse {
+    return result.data ?? result;
+}
+
+function getImageUrl(result: FalImageResult): string | null {
+    return getPayload(result).images?.[0]?.url ?? null;
+}
+
+async function fetchAsDataUrl(url: string): Promise<string> {
+    const response = await fetch(url);
     if (!response.ok) {
-        const message = body?.error?.message || `Nano Banana request failed with HTTP ${response.status}.`;
-        throw new NanoBananaClientError(NanoBananaError.APIError, message);
+        throw new NanoBananaClientError(NanoBananaError.APIError, `Failed to fetch generated image with HTTP ${response.status}.`);
     }
-    return body as T;
-}
 
-function isRetryableImageError(error: unknown): boolean {
-    return error instanceof NanoBananaClientError
-        && (error.message.includes("HTTP 429")
-            || error.message.includes("HTTP 500")
-            || error.message.includes("HTTP 502")
-            || error.message.includes("HTTP 503")
-            || error.message.includes("HTTP 504"));
-}
-
-async function sleep(ms: number): Promise<void> {
-    await new Promise((resolve) => window.setTimeout(resolve, ms));
-}
-
-function imagePartToDataUrl(part: GeminiImagePart | undefined): string | null {
-    const inline = part?.inlineData ?? part?.inline_data;
-    const mimeType = inline?.mimeType ?? inline?.mime_type;
-    const data = inline?.data;
-    if (!mimeType || !data) return null;
-    return `data:${mimeType};base64,${data}`;
-}
-
-async function requestNanoBanana(parts: Array<Record<string, unknown>>, modelUrl: string): Promise<string> {
-    const model = modelUrl.includes(NANO_BANANA_PRO_MODEL) ? NANO_BANANA_PRO_MODEL : NANO_BANANA_FALLBACK_MODEL;
-    logDebug("nano_banana.request", { model });
-    const response = await fetch(modelUrl, {
-        method: "POST",
-        headers: getHeaders(),
-        body: JSON.stringify({
-            contents: [{
-                parts,
-            }],
-            generationConfig: {
-                responseModalities: ["TEXT", "IMAGE"],
-                temperature: 0.1,
-            },
-        }),
+    const blob = await response.blob();
+    return await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : "");
+        reader.onerror = () => reject(reader.error ?? new Error("Failed to read generated image."));
+        reader.readAsDataURL(blob);
     });
+}
 
-    const data = await readJson<GeminiImageResponse>(response);
-    const imagePart = data.candidates?.[0]?.content?.parts?.find((part) => !!imagePartToDataUrl(part));
-    const dataUrl = imagePartToDataUrl(imagePart);
-    if (!dataUrl) {
-        logDebug("nano_banana.invalid_response", { model });
-        throw new NanoBananaClientError(NanoBananaError.InvalidResponse, "Nano Banana finished, but no image was returned.");
+async function uploadDataUrl(dataUrl: string): Promise<string> {
+    ensureFalConfigured();
+    const response = await fetch(dataUrl);
+    if (!response.ok) {
+        throw new NanoBananaClientError(NanoBananaError.APIError, `Failed to prepare image upload with HTTP ${response.status}.`);
     }
 
-    logDebug("nano_banana.success", {
-        model,
-        mimeType: dataUrl.startsWith("data:image/png") ? "image/png" : "image/jpeg",
+    const blob = await response.blob();
+    return await fal.storage.upload(blob, {
+        lifecycle: {
+            expiresIn: "1d",
+        },
     });
-
-    return dataUrl;
 }
 
-async function requestNanoBananaWithRetry(parts: Array<Record<string, unknown>>): Promise<string> {
-    const attempts = [
-        { url: NANO_BANANA_PRO_URL, delays: [0, 400, 1100] },
-        { url: NANO_BANANA_FALLBACK_URL, delays: [0, 250] },
-    ];
+function handleQueueUpdate(status: { status?: string }, onProgress?: (status: string) => void): void {
+    const next = status.status;
+    if (!next) return;
 
-    let lastError: unknown = null;
-
-    for (const attempt of attempts) {
-        for (let i = 0; i < attempt.delays.length; i++) {
-            const delay = attempt.delays[i];
-            if (delay > 0) await sleep(delay);
-
-            try {
-                return await requestNanoBanana(parts, attempt.url);
-            }
-            catch (error) {
-                lastError = error;
-                logDebug("nano_banana.retryable_error", {
-                    model: attempt.url.includes(NANO_BANANA_PRO_MODEL) ? NANO_BANANA_PRO_MODEL : NANO_BANANA_FALLBACK_MODEL,
-                    message: error instanceof Error ? error.message : String(error),
-                });
-                if (!isRetryableImageError(error) || i === attempt.delays.length - 1) break;
-            }
-        }
-    }
-
-    if (lastError instanceof Error) throw lastError;
-    throw new NanoBananaClientError(NanoBananaError.APIError, "Nano Banana image generation failed.");
+    if (next === "IN_QUEUE") onProgress?.("Waiting for Nano Banana...");
+    else if (next === "IN_PROGRESS") onProgress?.("Painting...");
 }
 
-export async function generateReferenceImage(
-    prompt: string,
-    onProgress?: (status: string) => void
+async function runNanoBanana(
+    endpoint: string,
+    input: Record<string, unknown>,
+    onProgress?: (status: string) => void,
+    output: "url" | "dataUrl" = "url"
 ): Promise<string> {
+    ensureFalConfigured();
+    logDebug("nano_banana.request", {
+        endpoint,
+        mode: output,
+    });
+
     try {
-        onProgress?.("Painting reference...");
-        return await requestNanoBananaWithRetry([{ text: prompt }]);
+        const result = await fal.subscribe(endpoint, {
+            input,
+            logs: true,
+            onQueueUpdate: (status) => handleQueueUpdate(status, onProgress),
+        });
+
+        const imageUrl = getImageUrl(result as FalImageResult);
+        if (!imageUrl) {
+            logDebug("nano_banana.invalid_response", { endpoint });
+            throw new NanoBananaClientError(NanoBananaError.InvalidResponse, "Nano Banana finished, but no image was returned.");
+        }
+
+        logDebug("nano_banana.success", {
+            endpoint,
+            output,
+        });
+
+        return output === "dataUrl"
+            ? await fetchAsDataUrl(imageUrl)
+            : imageUrl;
     }
     catch (error) {
         if (error instanceof NanoBananaClientError) throw error;
@@ -158,51 +131,130 @@ export async function generateReferenceImage(
     }
 }
 
+export async function generateReferenceImage(
+    prompt: string,
+    onProgress?: (status: string) => void
+): Promise<string> {
+    onProgress?.("Painting reference...");
+
+    return await runNanoBanana(
+        NANO_BANANA_PRO_MODEL,
+        {
+        prompt,
+        aspect_ratio: "1:1",
+        resolution: "1K",
+        output_format: "png",
+        num_images: 1,
+        limit_generations: true,
+        safety_tolerance: "4",
+        },
+        onProgress,
+        "url"
+    );
+}
+
+export async function generateBackdropPanorama(
+    prompt: string,
+    onProgress?: (status: string) => void
+): Promise<string> {
+    onProgress?.("Painting backdrop...");
+
+    return await runNanoBanana(
+        NANO_BANANA_PRO_MODEL,
+        {
+        prompt: `Create a polished Barbie-only storybook backdrop as a wide panoramic environment image.
+
+Scene idea: ${prompt}
+
+Rules:
+- the result must feel unmistakably Barbie
+- create a Barbie room, Barbie set, Barbie play environment, Barbie dreamhouse space, or Barbie fantasy location
+- use Barbie-coded materials, decor, color language, silhouettes, and styling
+- glamorous, playful, polished, toy-like, girlhood-forward visual direction
+- think dreamhouse, vanity room, fashion studio, music room, beach club, pink boutique, sparkle bedroom, runway backstage, pastel garden party
+- environment only
+- no people
+- no dolls
+- no characters
+- no close foreground subject
+- no text
+- no logo
+- no split panels
+- no realistic gritty architecture
+- no masculine industrial style
+- no horror, sci-fi war, dark fantasy, or generic realism
+- keep it child-safe, playful, glossy, and toy-like
+- make it readable behind AR toys
+- prefer a wide panoramic composition with strong left-right environmental coverage
+- rich background details are fine, but keep the center area visually open for a doll scene
+
+Return only the image.`,
+        aspect_ratio: "16:9",
+        resolution: "2K",
+        output_format: "png",
+        num_images: 1,
+        limit_generations: true,
+        safety_tolerance: "4",
+        },
+        onProgress,
+        "url"
+    );
+}
+
 export async function polishCaptureImage(
     imageDataUrl: string,
     characterPrompt: string,
     worldPrompt: string,
     onProgress?: (status: string) => void
 ): Promise<string> {
-    try {
-        onProgress?.("Cinematic polish...");
-        return await requestNanoBananaWithRetry([
-            {
-                inlineData: {
-                    mimeType: imageDataUrl.startsWith("data:image/png") ? "image/png" : "image/jpeg",
-                    data: imageDataUrl.replace(/^data:image\/[a-zA-Z0-9.+-]+;base64,/, ""),
-                },
-            },
-            {
-                text: `This is a user-generated AR screenshot for a Barbie story app.
-You are doing a restrained cleanup pass only.
+    onProgress?.("Cinematic composite...");
+    const uploadedImageUrl = await uploadDataUrl(imageDataUrl);
 
-Hard rules:
-- Preserve the exact composition, crop, camera angle, pose, proportions, and silhouette.
-- Preserve the exact environment and prop layout.
-- Preserve the exact color scheme and overall lighting direction.
-- Preserve the Barbie identity from this capture and the prompt: ${characterPrompt}.
-- Preserve the world/background context from: ${worldPrompt || "a whimsical Barbie storybook scene"}.
-- Do not redesign, restyle, beautify, re-illustrate, or reimagine the image.
-- Do not change the face, eyes, nose, mouth, hairstyle, body shape, dress shape, hands, or background geometry.
-- Do not add or remove objects, accessories, sparkles, borders, text, or people.
+    return await runNanoBanana(
+        NANO_BANANA_PRO_EDIT_MODEL,
+        {
+        prompt: `This is a user-generated AR screenshot for a Barbie story app.
+Turn it into one cohesive, cinematic final image while preserving the same scene and composition.
 
-Allowed edits only:
-- clean render blemishes
-- soften harsh artifacts
-- slightly improve edge quality
-- slightly improve lighting coherence
-- lightly enhance clarity while keeping the image recognizably the same shot
+Core goal:
+- make the character, props, and background feel like they belong in one polished animated movie frame
+- unify the lighting, color, depth, and shadows across the whole shot
+- keep the same camera view, same scene layout, and same storytelling beat
 
-Return the same image, just subtly cleaner.`,
-            },
-        ]);
-    }
-    catch (error) {
-        if (error instanceof NanoBananaClientError) throw error;
-        throw new NanoBananaClientError(
-            NanoBananaError.APIError,
-            error instanceof Error ? error.message : "Nano Banana image editing failed."
-        );
-    }
+Hard constraints:
+- preserve the exact composition and crop
+- preserve the exact pose and silhouette of the character
+- preserve the exact environment and prop placement
+- preserve the overall identity of the scene based on: ${characterPrompt}
+- preserve the world context based on: ${worldPrompt || "a whimsical Barbie storybook scene"}
+- do not add or remove objects, people, text, borders, or decorations
+- do not turn it into a different outfit, different prop set, or different room
+
+What to improve:
+- blend the AR elements and background into a single cohesive image
+- make lighting feel cinematic, soft, glossy, and movie-like
+- improve shadow logic so objects feel grounded
+- improve color harmony and depth
+- reduce harsh compositing artifacts and mismatched edges
+- give the image a polished animated-feature finish
+- keep it child-safe, Barbie-like, premium, and magical
+
+Important:
+- this should still clearly be the same scene
+- do not radically restyle it
+- do not flatten it into a generic filter
+- do not make it gritty, realistic, dark, or dramatic in a non-Barbie way
+
+Return one polished cinematic composite of the same shot.`,
+        image_urls: [uploadedImageUrl],
+        aspect_ratio: "auto",
+        resolution: "2K",
+        output_format: "png",
+        num_images: 1,
+        limit_generations: true,
+        safety_tolerance: "4",
+        },
+        onProgress,
+        "dataUrl"
+    );
 }

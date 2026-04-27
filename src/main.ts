@@ -1,14 +1,16 @@
 import { addComponent, onStart, WebXR } from "@needle-tools/engine";
 import * as THREE from "three";
 import "./generated/gen.js";
+import { AccessorySpawner } from "./components/AccessorySpawner";
 import { ARPlacement } from "./components/ARPlacement";
+import { BackgroundSpawner } from "./components/BackgroundSpawner";
 import { CharacterSpawner } from "./components/CharacterSpawner";
 import { HUD } from "./components/HUD";
+import { LibraryUI } from "./components/LibraryUI";
 import { ScrapbookUI } from "./components/ScrapbookUI";
 import { SceneGestures } from "./components/SceneGestures";
 import { SceneRig } from "./components/SceneRig";
-import { WorldSplatRenderer } from "./components/WorldSplatRenderer";
-import { WorldSpawner } from "./components/WorldSpawner";
+import { StagePropSpawner } from "./components/StagePropSpawner";
 import * as ScrapbookStore from "./store/ScrapbookStore";
 import { installDebugLogBridge, logDebug } from "./utils/DebugLog";
 
@@ -34,7 +36,10 @@ void ScrapbookStore.init().catch((error) => {
 });
 
 onStart((context) => {
-    context.scene.background = new THREE.Color("#10000b");
+    context.scene.background = null;
+    context.renderer.setClearColor(new THREE.Color("#000000"), 0);
+    context.domElement.setAttribute("background-color", "transparent");
+    context.devicePixelRatio = Math.min(1, window.devicePixelRatio || 1);
     context.mainCamera.position.set(0, 1.4, 2.2);
     context.mainCamera.lookAt(0, 1.1, 0);
 
@@ -59,9 +64,11 @@ onStart((context) => {
     addComponent(context.scene, ARPlacement);
     addComponent(context.scene, SceneRig);
     addComponent(context.scene, SceneGestures);
+    addComponent(context.scene, BackgroundSpawner);
     addComponent(context.scene, CharacterSpawner);
-    addComponent(context.scene, WorldSplatRenderer);
-    addComponent(context.scene, WorldSpawner);
+    addComponent(context.scene, AccessorySpawner);
+    addComponent(context.scene, StagePropSpawner);
+    addComponent(context.scene, LibraryUI);
     addComponent(context.scene, ScrapbookUI);
     addComponent(context.scene, HUD);
 });

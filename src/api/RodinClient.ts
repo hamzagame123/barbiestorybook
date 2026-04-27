@@ -1,9 +1,7 @@
+import { fal } from "@fal-ai/client";
 import { FAL_API_KEY } from "../secrets";
 
-const RODIN_QUEUE_URL = "https://queue.fal.run/fal-ai/hyper3d/rodin";
-const RODIN_V2_QUEUE_URL = "https://queue.fal.run/fal-ai/hyper3d/rodin/v2";
-const POLL_INTERVAL_MS = 2500;
-const TIMEOUT_MS = 240_000;
+const RODIN_MODEL = "fal-ai/hyper3d/rodin/v2";
 
 export enum RodinError {
     Timeout = "timeout",
@@ -18,12 +16,6 @@ export class RodinClientError extends Error {
     }
 }
 
-type QueueSubmitResponse = {
-    request_id?: string;
-    status_url?: string;
-    response_url?: string;
-};
-
 type QueueLog = {
     message?: string;
 };
@@ -33,138 +25,79 @@ type QueueStatusResponse = {
     logs?: QueueLog[];
 };
 
-type QueueResultResponse = {
+type RodinResultPayload = {
     model_mesh?: {
         url?: string;
     };
     glb?: {
         url?: string;
     };
-    model_urls?: string[];
-    response?: {
-        model_mesh?: {
-            url?: string;
-        };
-        glb?: {
-            url?: string;
-        };
-        model_urls?: string[];
-    };
+    model_meshes?: Array<{ url?: string }>;
 };
 
-function getAuthHeaders(): HeadersInit {
-    return {
-        Authorization: `Key ${FAL_API_KEY}`,
-        "Content-Type": "application/json",
-    };
+type RodinResult = {
+    data?: RodinResultPayload;
+} & RodinResultPayload;
+
+let falConfigured = false;
+
+function ensureFalConfigured(): void {
+    if (falConfigured) return;
+
+    fal.config({
+        credentials: FAL_API_KEY,
+        suppressLocalCredentialsWarning: true,
+    });
+    falConfigured = true;
 }
 
-async function readJson<T>(response: Response, errorType: RodinError): Promise<T> {
-    let body: unknown = null;
-    try {
-        body = await response.json();
-    }
-    catch {
-        if (!response.ok) {
-            throw new RodinClientError(errorType, `Rodin request failed with HTTP ${response.status}.`);
-        }
-    }
-
-    if (!response.ok) {
-        const message = typeof body === "object" && body && "detail" in body
-            ? String((body as { detail?: string }).detail)
-            : `Rodin request failed with HTTP ${response.status}.`;
-        throw new RodinClientError(errorType, message);
-    }
-
-    return body as T;
-}
-
-function sleep(ms: number): Promise<void> {
-    return new Promise(resolve => window.setTimeout(resolve, ms));
-}
-
-function inferProgressMessage(status: QueueStatusResponse, elapsedMs: number): string {
-    const logs = status.logs?.map(log => log.message?.toLowerCase() ?? "").join(" ") ?? "";
-    if (logs.includes("texture")) return "Generating character... (texturing)";
+function inferProgressMessage(status: QueueStatusResponse): string {
+    const logs = status.logs?.map((log) => log.message?.toLowerCase() ?? "").join(" ") ?? "";
+    if (logs.includes("texture")) return "Generating 3D model... (texturing)";
     if (logs.includes("mesh") || logs.includes("shape") || logs.includes("geometry") || status.status === "IN_QUEUE") {
-        return "Generating character... (sculpting)";
+        return "Generating 3D model... (sculpting)";
     }
-    if (elapsedMs > 55_000) return "Almost ready...";
-    if (elapsedMs > 30_000) return "Generating character... (texturing)";
-    return "Generating character... (sculpting)";
+    return "Generating 3D model...";
 }
 
-async function submitAndPollRodin(
-    submitUrl: string,
-    body: Record<string, unknown>,
+function getPayload(result: RodinResult): RodinResultPayload {
+    return result.data ?? result;
+}
+
+function getGlbUrl(result: RodinResult): string | null {
+    const payload = getPayload(result);
+    return payload.model_mesh?.url
+        ?? payload.glb?.url
+        ?? payload.model_meshes?.[0]?.url
+        ?? null;
+}
+
+async function runRodin(
+    input: Record<string, unknown>,
     onProgress?: (status: string) => void
 ): Promise<string> {
+    ensureFalConfigured();
+
     try {
-        const submitResponse = await fetch(submitUrl, {
-            method: "POST",
-            headers: getAuthHeaders(),
-            body: JSON.stringify(body),
+        const result = await fal.subscribe(RODIN_MODEL, {
+            input,
+            logs: true,
+            onQueueUpdate: (status) => onProgress?.(inferProgressMessage(status as QueueStatusResponse)),
         });
 
-        const submitData = await readJson<QueueSubmitResponse>(submitResponse, RodinError.APIError);
-        const requestId = submitData.request_id;
-        if (!requestId) {
-            throw new RodinClientError(RodinError.InvalidResponse, "Rodin did not return a request id.");
+        const glbUrl = getGlbUrl(result as RodinResult);
+        if (!glbUrl) {
+            throw new RodinClientError(RodinError.InvalidResponse, "Rodin finished, but no GLB url was returned.");
         }
 
-        const statusUrl = submitData.status_url ?? `https://queue.fal.run/fal-ai/hyper3d/requests/${requestId}/status`;
-        const responseUrl = submitData.response_url ?? `https://queue.fal.run/fal-ai/hyper3d/requests/${requestId}`;
-
-        const startedAt = Date.now();
-        while (Date.now() - startedAt < TIMEOUT_MS) {
-            const statusResponse = await fetch(`${statusUrl}${statusUrl.includes("?") ? "&" : "?"}logs=1`, {
-                method: "GET",
-                headers: {
-                    Authorization: `Key ${FAL_API_KEY}`,
-                },
-            });
-
-            const statusData = await readJson<QueueStatusResponse>(statusResponse, RodinError.APIError);
-            onProgress?.(inferProgressMessage(statusData, Date.now() - startedAt));
-
-            if (statusData.status === "COMPLETED") {
-                onProgress?.("Almost ready...");
-                const resultResponse = await fetch(responseUrl, {
-                    method: "GET",
-                    headers: {
-                        Authorization: `Key ${FAL_API_KEY}`,
-                    },
-                });
-
-                const resultData = await readJson<QueueResultResponse>(resultResponse, RodinError.APIError);
-                const glbUrl =
-                    resultData.model_mesh?.url ??
-                    resultData.glb?.url ??
-                    resultData.model_urls?.[0] ??
-                    resultData.response?.model_mesh?.url ??
-                    resultData.response?.glb?.url ??
-                    resultData.response?.model_urls?.[0];
-
-                if (!glbUrl) {
-                    throw new RodinClientError(RodinError.InvalidResponse, "Rodin finished, but no GLB url was returned.");
-                }
-
-                return glbUrl;
-            }
-
-            if (statusData.status === "FAILED") {
-                throw new RodinClientError(RodinError.APIError, "Rodin generation failed.");
-            }
-
-            await sleep(POLL_INTERVAL_MS);
-        }
-
-        throw new RodinClientError(RodinError.Timeout, "Rodin generation timed out after 240 seconds.");
+        return glbUrl;
     }
     catch (error) {
         if (error instanceof RodinClientError) throw error;
-        throw new RodinClientError(RodinError.APIError, error instanceof Error ? error.message : "Rodin generation failed.");
+        throw new RodinClientError(
+            RodinError.APIError,
+            error instanceof Error ? error.message : "Rodin generation failed."
+        );
     }
 }
 
@@ -172,16 +105,13 @@ export async function generateCharacter(
     prompt: string,
     onProgress?: (status: string) => void
 ): Promise<string> {
-    return submitAndPollRodin(
-        RODIN_QUEUE_URL,
-        {
-            prompt,
-            geometry_file_format: "glb",
-            material: "PBR",
-            quality: "medium",
-        },
-        onProgress
-    );
+    return await runRodin({
+        prompt,
+        geometry_file_format: "glb",
+        material: "PBR",
+        quality_mesh_option: "500K Triangle",
+        preview_render: false,
+    }, onProgress);
 }
 
 export async function generateCharacterFromImage(
@@ -189,15 +119,12 @@ export async function generateCharacterFromImage(
     prompt: string,
     onProgress?: (status: string) => void
 ): Promise<string> {
-    return submitAndPollRodin(
-        RODIN_V2_QUEUE_URL,
-        {
-            prompt,
-            input_image_urls: [imageUrl],
-            geometry_file_format: "glb",
-            material: "PBR",
-            quality_mesh_option: "500K Triangle",
-        },
-        onProgress
-    );
+    return await runRodin({
+        prompt,
+        input_image_urls: [imageUrl],
+        geometry_file_format: "glb",
+        material: "PBR",
+        quality_mesh_option: "500K Triangle",
+        preview_render: false,
+    }, onProgress);
 }

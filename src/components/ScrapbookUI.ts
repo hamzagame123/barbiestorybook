@@ -1,34 +1,92 @@
 import { Behaviour } from "@needle-tools/engine";
-import { getAllPages, type ScrapbookPage } from "../store/ScrapbookStore";
-import { exportDebugLogs, logDebug } from "../utils/DebugLog";
+import { deletePage, getAllPages, savePage, type ScrapbookPage } from "../store/ScrapbookStore";
+import defaultBookCoverUrl from "../assets/storybook/default-book-cover.png?url";
+import pageQuiltedPinkUrl from "../assets/storybook/backgrounds/page-quilted-pink.png?url";
+import pageCloudsUrl from "../assets/storybook/backgrounds/page-clouds.png?url";
+import pageGlitterUrl from "../assets/storybook/backgrounds/page-glitter.png?url";
+import pageBowsHeartsUrl from "../assets/storybook/backgrounds/page-bows-hearts.png?url";
+import pageInfiniteBowsHeartsUrl from "../assets/storybook/backgrounds/page-infinite-bows-hearts.png?url";
+import { playSfx } from "../utils/AudioPlayer";
 
-const TAPE_COLORS = [
-    "rgba(255,180,100,0.8)",
-    "rgba(180,220,255,0.8)",
-    "rgba(200,255,180,0.8)",
-    "rgba(255,180,220,0.8)",
+type BookTheme = {
+    id: string;
+    label: string;
+    coverUrl: string;
+};
+
+type PageBackgroundAsset = {
+    id: string;
+    label: string;
+    url: string;
+};
+
+const BOOK_THEMES: BookTheme[] = [
+    { id: "default", label: "Classic Pink", coverUrl: defaultBookCoverUrl },
 ];
 
-function makeImageDataUrl(page: ScrapbookPage, usePolished = false): string {
+const PAGE_BACKGROUNDS: readonly PageBackgroundAsset[] = [
+    { id: "quilted", label: "Quilted Pink", url: pageQuiltedPinkUrl },
+    { id: "clouds", label: "Clouds", url: pageCloudsUrl },
+    { id: "glitter", label: "Glitter", url: pageGlitterUrl },
+    { id: "bows-hearts", label: "Bows + Hearts", url: pageBowsHeartsUrl },
+] as const;
+
+function makeImageDataUrl(page: ScrapbookPage, usePolished = true): string {
     if (usePolished && page.polishedImageBase64) {
         return `data:${page.polishedMimeType || page.mimeType || "image/jpeg"};base64,${page.polishedImageBase64}`;
     }
     return `data:${page.mimeType || "image/jpeg"};base64,${page.imageBase64}`;
 }
 
+function getSeed(id: string): number {
+    let hash = 0;
+    for (let i = 0; i < id.length; i++) {
+        hash = ((hash << 5) - hash) + id.charCodeAt(i);
+        hash |= 0;
+    }
+    return Math.abs(hash);
+}
+
+function getBackgroundAsset(page: ScrapbookPage): PageBackgroundAsset {
+    if (page.backgroundId) {
+        const match = PAGE_BACKGROUNDS.find(asset => asset.id === page.backgroundId);
+        if (match) return match;
+    }
+    return PAGE_BACKGROUNDS[getSeed(page.id) % PAGE_BACKGROUNDS.length];
+}
+
 export class ScrapbookUI extends Behaviour {
     static instance: ScrapbookUI | null = null;
 
     private overlay!: HTMLDivElement;
-    private grid!: HTMLDivElement;
+    private coverStage!: HTMLDivElement;
+    private coverArtButton!: HTMLButtonElement;
+    private coverArtImage!: HTMLImageElement;
+    private coverStrip!: HTMLDivElement;
+    private feedStage!: HTMLDivElement;
+    private feedList!: HTMLDivElement;
     private emptyState!: HTMLDivElement;
     private viewer!: HTMLDivElement;
     private viewerImage!: HTMLImageElement;
     private viewerCaption!: HTMLDivElement;
-    private exportLogsButton!: HTMLButtonElement;
+
+    private pages: ScrapbookPage[] = [];
+    private activeThemeId = BOOK_THEMES[0].id;
 
     static toggle(): void {
         void ScrapbookUI.instance?.toggle();
+    }
+
+    static open(): void {
+        void ScrapbookUI.instance?.open();
+    }
+
+    static close(): void {
+        ScrapbookUI.instance?.close();
+    }
+
+    static isOpen(): boolean {
+        return !!ScrapbookUI.instance && !ScrapbookUI.instance.overlay.hidden;
     }
 
     awake(): void {
@@ -39,103 +97,220 @@ export class ScrapbookUI extends Behaviour {
 
     onDestroy(): void {
         this.overlay?.remove();
-        if (ScrapbookUI.instance === this) {
-            ScrapbookUI.instance = null;
-        }
+        if (ScrapbookUI.instance === this) ScrapbookUI.instance = null;
     }
 
     async toggle(): Promise<void> {
-        const shouldShow = this.overlay.hidden;
-        if (!shouldShow) this.closeViewer();
-        this.overlay.hidden = !shouldShow;
-        const overlayHost = this.getOverlayHost();
-        overlayHost.style.overflow = shouldShow ? "hidden" : "";
-        logDebug("scrapbook.toggle", { open: shouldShow });
-
-        if (shouldShow) await this.loadPages();
+        if (this.overlay.hidden) await this.open();
+        else this.close();
     }
 
-    async loadPages(): Promise<void> {
+    async open(): Promise<void> {
+        if (!this.overlay.hidden) return;
+        this.overlay.hidden = false;
+        this.getOverlayHost().style.overflow = "hidden";
+        window.dispatchEvent(new CustomEvent("barbie-scrapbook-visibilitychange", { detail: { open: true } }));
+        this.showCover();
+        await this.loadPages();
+    }
+
+    close(): void {
+        if (this.overlay.hidden) return;
+        this.closeViewer();
+        this.overlay.hidden = true;
+        this.getOverlayHost().style.overflow = "";
+        window.dispatchEvent(new CustomEvent("barbie-scrapbook-visibilitychange", { detail: { open: false } }));
+    }
+
+    private get activeTheme(): BookTheme {
+        return BOOK_THEMES.find(theme => theme.id === this.activeThemeId) ?? BOOK_THEMES[0];
+    }
+
+    private async loadPages(): Promise<void> {
         try {
-            this.renderPages(await getAllPages());
+            this.pages = await getAllPages();
         }
-        catch (error) {
-            logDebug("scrapbook.load_failed", {
-                message: error instanceof Error ? error.message : String(error),
-            });
-            this.renderPages([]);
+        catch {
+            this.pages = [];
         }
+        this.renderCoverPicker();
+        this.renderFeed();
     }
 
-    private renderPages(pages: ScrapbookPage[]): void {
-        this.grid.innerHTML = "";
-        this.emptyState.hidden = pages.length > 0;
+    private showCover(): void {
+        playSfx("page_turn", 0.6);
+        this.coverStage.hidden = false;
+        this.feedStage.hidden = true;
+        this.coverArtImage.src = this.activeTheme.coverUrl;
+        this.coverArtImage.alt = `${this.activeTheme.label} cover`;
+    }
 
-        pages.forEach((page, index) => {
-            const card = document.createElement("article");
-            card.className = "page-card";
-            card.style.transform = `rotate(${this.getRotationFromId(page.id)}deg)`;
-            card.addEventListener("click", () => this.openViewer(page));
+    private showFeed(): void {
+        playSfx("page_turn", 0.6);
+        this.coverStage.hidden = true;
+        this.feedStage.hidden = false;
+        this.renderFeed();
+    }
 
-            const tape = document.createElement("div");
-            tape.className = "washi-tape";
-            tape.style.background = TAPE_COLORS[index % TAPE_COLORS.length];
-
-            const image = document.createElement("img");
-            image.src = makeImageDataUrl(page);
-            image.alt = page.caption;
-            image.loading = "lazy";
-            image.decoding = "async";
-            image.addEventListener("error", () => {
-                if (page.polishedImageBase64) {
-                    image.src = makeImageDataUrl(page, true);
-                }
+    private renderCoverPicker(): void {
+        this.coverStrip.replaceChildren();
+        if (BOOK_THEMES.length <= 1) {
+            this.coverStrip.hidden = true;
+            return;
+        }
+        this.coverStrip.hidden = false;
+        BOOK_THEMES.forEach((theme) => {
+            const button = document.createElement("button");
+            button.type = "button";
+            button.className = "storybook-cover-chip";
+            if (theme.id === this.activeThemeId) button.classList.add("is-active");
+            button.textContent = theme.label;
+            button.addEventListener("click", () => {
+                this.activeThemeId = theme.id;
+                this.coverArtImage.src = theme.coverUrl;
+                this.renderCoverPicker();
             });
-
-            const caption = document.createElement("div");
-            caption.className = "card-caption";
-            caption.textContent = page.caption;
-
-            const world = document.createElement("div");
-            world.className = "card-world";
-            world.textContent = page.characterPrompt;
-
-            card.append(tape, image, caption, world);
-            this.grid.append(card);
+            this.coverStrip.append(button);
         });
     }
 
+    private renderFeed(): void {
+        this.feedList.replaceChildren();
+        this.emptyState.hidden = this.pages.length > 0;
+        if (this.pages.length === 0) return;
+
+        this.pages.forEach((page, index) => {
+            const backgroundAsset = getBackgroundAsset(page);
+
+            const card = document.createElement("article");
+            card.className = "storybook-feed-card";
+            card.style.setProperty("--page-background", `url("${backgroundAsset.url}")`);
+
+            const mediaButton = document.createElement("button");
+            mediaButton.type = "button";
+            mediaButton.className = "storybook-media-button";
+            mediaButton.addEventListener("click", () => this.openViewer(page));
+
+            const media = document.createElement("div");
+            media.className = "storybook-media";
+            media.style.setProperty("--media-aspect", "0.82");
+
+            const image = document.createElement("img");
+            image.className = "storybook-photo";
+            image.src = makeImageDataUrl(page);
+            image.alt = page.caption || "Storybook memory";
+            image.decoding = "async";
+            image.loading = "lazy";
+            image.onerror = () => {
+                if (page.polishedImageBase64) image.src = makeImageDataUrl(page, true);
+            };
+
+            media.append(image);
+            mediaButton.append(media);
+
+            const text = document.createElement("div");
+            text.className = "storybook-text";
+
+            const captionInput = document.createElement("textarea");
+            captionInput.className = "storybook-caption-input";
+            captionInput.rows = 2;
+            captionInput.placeholder = "Write your caption...";
+            captionInput.value = page.caption;
+
+            const prompt = document.createElement("div");
+            prompt.className = "storybook-prompt";
+            prompt.textContent = page.characterPrompt;
+
+            const meta = document.createElement("div");
+            meta.className = "storybook-meta";
+            meta.textContent = this.formatDate(page.timestamp, index);
+
+            const actions = document.createElement("div");
+            actions.className = "storybook-actions";
+
+            const saveButton = document.createElement("button");
+            saveButton.type = "button";
+            saveButton.className = "storybook-action-btn is-primary";
+            saveButton.textContent = "SAVE";
+            saveButton.addEventListener("click", () => {
+                void this.updatePage(page, { caption: captionInput.value.trim() }, saveButton, "SAVED");
+            });
+
+            const deleteButton = document.createElement("button");
+            deleteButton.type = "button";
+            deleteButton.className = "storybook-action-btn is-danger";
+            deleteButton.textContent = "DELETE";
+            deleteButton.addEventListener("click", () => {
+                void this.removePage(page.id, deleteButton);
+            });
+
+            actions.append(saveButton, deleteButton);
+
+            text.append(captionInput, prompt, meta, actions);
+            card.append(mediaButton, text);
+            this.feedList.append(card);
+        });
+    }
+
+    private formatDate(timestamp: number, index: number): string {
+        const date = new Date(timestamp);
+        const pretty = Number.isNaN(date.getTime())
+            ? "Saved moment"
+            : date.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+        return `${pretty} - Memory ${index + 1}`;
+    }
+
+    private async updatePage(
+        page: ScrapbookPage,
+        patch: Partial<ScrapbookPage>,
+        button?: HTMLButtonElement,
+        successText = "DONE"
+    ): Promise<void> {
+        const nextPage = { ...page, ...patch };
+        if (button) {
+            button.disabled = true;
+            button.textContent = "SAVING...";
+        }
+        await savePage(nextPage);
+        const pageIndex = this.pages.findIndex(entry => entry.id === page.id);
+        if (pageIndex >= 0) this.pages[pageIndex] = nextPage;
+        this.renderFeed();
+        if (button) {
+            button.disabled = false;
+            button.textContent = successText;
+            window.setTimeout(() => {
+                button.textContent = button.classList.contains("is-primary") ? "SAVE" : "AUTO CAPTION";
+            }, 900);
+        }
+    }
+
+    private async removePage(id: string, button: HTMLButtonElement): Promise<void> {
+        button.disabled = true;
+        button.textContent = "DELETING...";
+        playSfx("delete", 0.6);
+        await deletePage(id);
+        this.pages = this.pages.filter(page => page.id !== id);
+        this.renderFeed();
+    }
+
     private openViewer(page: ScrapbookPage): void {
-        logDebug("scrapbook.viewer_open", { id: page.id });
         this.viewer.hidden = false;
         this.viewerImage.src = makeImageDataUrl(page);
-        this.viewerImage.alt = page.caption;
+        this.viewerImage.alt = page.caption || "Storybook memory";
         this.viewerImage.decoding = "async";
         this.viewerImage.onerror = () => {
-            if (page.polishedImageBase64) {
-                this.viewerImage.src = makeImageDataUrl(page, true);
-            }
+            if (page.polishedImageBase64) this.viewerImage.src = makeImageDataUrl(page, true);
         };
-        this.viewerCaption.textContent = `${page.caption} • ${page.characterPrompt}`;
-        this.overlay.style.overflow = "hidden";
+        this.viewerCaption.textContent = page.caption
+            ? `${page.caption} - ${page.characterPrompt}`
+            : page.characterPrompt;
     }
 
     private closeViewer(): void {
-        logDebug("scrapbook.viewer_close");
         this.viewer.hidden = true;
         this.viewerImage.onerror = null;
         this.viewerImage.removeAttribute("src");
         this.viewerCaption.textContent = "";
-        this.overlay.style.overflowY = "auto";
-    }
-
-    private getRotationFromId(id: string): number {
-        let hash = 0;
-        for (let i = 0; i < id.length; i++) {
-            hash = ((hash << 5) - hash) + id.charCodeAt(i);
-            hash |= 0;
-        }
-        return ((Math.abs(hash) % 400) / 100) - 2;
     }
 
     private injectMarkup(): void {
@@ -144,15 +319,35 @@ export class ScrapbookUI extends Behaviour {
         overlay.hidden = true;
         overlay.dataset.barbieOverlay = "true";
         overlay.innerHTML = `
-            <div id="scrapbook-header">
-                <span id="scrapbook-title">Barbie's Storybook</span>
-                <div id="scrapbook-header-actions">
-                    <button id="scrapbook-export-logs" type="button" aria-label="Export debug logs">LOGS</button>
-                    <button id="scrapbook-close" type="button" aria-label="Close scrapbook">X</button>
-                </div>
+            <div id="storybook-topbar">
+                <div id="storybook-topbar-title">Barbie Storybook</div>
+                <button id="scrapbook-close" type="button" aria-label="Close storybook">X</button>
             </div>
-            <div id="scrapbook-grid"></div>
-            <div id="scrapbook-empty" hidden>Your story starts here ✨</div>
+
+            <section id="storybook-cover-stage">
+                <div id="storybook-cover-copy">
+                    <div class="storybook-kicker">YOUR BOOK</div>
+                    <div class="storybook-headline">Start with the classic cover, then open into your saved memories.</div>
+                </div>
+                <button id="storybook-cover-art" type="button" aria-label="Open storybook">
+                    <img id="storybook-cover-image" alt="" />
+                </button>
+                <div id="storybook-cover-hint">Tap the book to open</div>
+                <div id="storybook-cover-strip" hidden></div>
+            </section>
+
+            <section id="storybook-feed-stage" hidden>
+                <div id="storybook-feed-header">
+                    <button id="storybook-back-to-cover" type="button">COVER</button>
+                    <div id="storybook-feed-copy">
+                        <div class="storybook-kicker">STORYBOOK FEED</div>
+                        <div class="storybook-feed-title">Your Barbie memories</div>
+                    </div>
+                </div>
+                <div id="storybook-empty" hidden>Your first polished page will appear here.</div>
+                <div id="storybook-feed-list"></div>
+            </section>
+
             <div id="scrapbook-viewer" hidden>
                 <button id="scrapbook-viewer-close" type="button" aria-label="Close image preview">X</button>
                 <img id="scrapbook-viewer-image" alt="" />
@@ -163,31 +358,27 @@ export class ScrapbookUI extends Behaviour {
         this.getOverlayHost().append(overlay);
 
         this.overlay = overlay;
-        this.grid = overlay.querySelector("#scrapbook-grid") as HTMLDivElement;
-        this.emptyState = overlay.querySelector("#scrapbook-empty") as HTMLDivElement;
+        this.coverStage = overlay.querySelector("#storybook-cover-stage") as HTMLDivElement;
+        this.coverArtButton = overlay.querySelector("#storybook-cover-art") as HTMLButtonElement;
+        this.coverArtImage = overlay.querySelector("#storybook-cover-image") as HTMLImageElement;
+        this.coverStrip = overlay.querySelector("#storybook-cover-strip") as HTMLDivElement;
+        this.feedStage = overlay.querySelector("#storybook-feed-stage") as HTMLDivElement;
+        this.feedList = overlay.querySelector("#storybook-feed-list") as HTMLDivElement;
+        this.emptyState = overlay.querySelector("#storybook-empty") as HTMLDivElement;
         this.viewer = overlay.querySelector("#scrapbook-viewer") as HTMLDivElement;
         this.viewerImage = overlay.querySelector("#scrapbook-viewer-image") as HTMLImageElement;
         this.viewerCaption = overlay.querySelector("#scrapbook-viewer-caption") as HTMLDivElement;
 
-        const closeButton = overlay.querySelector("#scrapbook-close") as HTMLButtonElement;
-        closeButton.addEventListener("click", (event) => {
+        (overlay.querySelector("#scrapbook-close") as HTMLButtonElement).addEventListener("click", (event) => {
             event.stopPropagation();
-            void this.toggle();
+            this.close();
         });
-
-        this.exportLogsButton = overlay.querySelector("#scrapbook-export-logs") as HTMLButtonElement;
-        this.exportLogsButton.addEventListener("click", (event) => {
-            event.stopPropagation();
-            logDebug("scrapbook.export_logs");
-            exportDebugLogs();
-        });
-
-        const viewerCloseButton = overlay.querySelector("#scrapbook-viewer-close") as HTMLButtonElement;
-        viewerCloseButton.addEventListener("click", (event) => {
+        this.coverArtButton.addEventListener("click", () => this.showFeed());
+        (overlay.querySelector("#storybook-back-to-cover") as HTMLButtonElement).addEventListener("click", () => this.showCover());
+        (overlay.querySelector("#scrapbook-viewer-close") as HTMLButtonElement).addEventListener("click", (event) => {
             event.stopPropagation();
             this.closeViewer();
         });
-
         this.viewer.addEventListener("click", (event) => {
             if (event.target === this.viewer) this.closeViewer();
         });
@@ -196,17 +387,14 @@ export class ScrapbookUI extends Behaviour {
     private getOverlayHost(): HTMLElement {
         const host = this.context.domElement;
         if (host instanceof HTMLElement) return this.getOrCreateOverlayRoot(host);
-
         const needleEngine = document.querySelector("needle-engine");
         if (needleEngine instanceof HTMLElement) return this.getOrCreateOverlayRoot(needleEngine);
-
         return document.body;
     }
 
     private getOrCreateOverlayRoot(host: HTMLElement): HTMLElement {
-        const existingRoot = Array.from(host.children).find((child) => child instanceof HTMLElement && child.id === "barbie-overlay-root");
+        const existingRoot = Array.from(host.children).find(child => child instanceof HTMLElement && child.id === "barbie-overlay-root");
         if (existingRoot instanceof HTMLElement) return existingRoot;
-
         const overlayRoot = document.createElement("div");
         overlayRoot.id = "barbie-overlay-root";
         overlayRoot.dataset.barbieOverlay = "true";
@@ -220,145 +408,307 @@ export class ScrapbookUI extends Behaviour {
 
     private injectStyles(): void {
         if (document.getElementById("barbie-scrapbook-styles")) return;
-
         const style = document.createElement("style");
         style.id = "barbie-scrapbook-styles";
         style.textContent = `
             #scrapbook-overlay[hidden],
-            #scrapbook-viewer[hidden] {
+            #scrapbook-viewer[hidden],
+            #storybook-cover-stage[hidden],
+            #storybook-feed-stage[hidden],
+            #storybook-cover-strip[hidden],
+            #storybook-empty[hidden] {
                 display: none !important;
-                pointer-events: none !important;
             }
 
             #scrapbook-overlay {
                 position: fixed;
                 inset: 0;
-                background: rgba(255, 246, 240, 0.992);
                 z-index: 1000;
-                overflow-y: auto;
-                font-family: "Fraunces", serif;
-                color: #3a1a2a;
-                opacity: 1;
-                isolation: isolate;
+                display: flex;
+                flex-direction: column;
+                background:
+                    linear-gradient(180deg, rgba(255, 248, 252, 0.82), rgba(248, 234, 241, 0.82)),
+                    url("${pageInfiniteBowsHeartsUrl}");
+                background-size: auto, 340px auto;
+                background-repeat: repeat;
+                color: var(--brand-ink);
+                font-family: var(--font-display);
                 pointer-events: auto;
-                touch-action: pan-y;
+                overflow-y: auto;
+                -webkit-overflow-scrolling: touch;
             }
 
-            #scrapbook-header {
+            #storybook-topbar {
                 position: sticky;
                 top: 0;
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-                padding: calc(env(safe-area-inset-top, 0px) + 20px) 20px 20px;
-                background: rgba(255, 246, 240, 0.995);
-                border-bottom: 1px solid rgba(200,100,130,0.2);
                 z-index: 2;
-            }
-
-            #scrapbook-header-actions {
                 display: flex;
                 align-items: center;
-                gap: 10px;
+                justify-content: space-between;
+                padding: calc(env(safe-area-inset-top, 0px) + 16px) 18px 12px;
+                background: rgba(255, 247, 251, 0.88);
+                backdrop-filter: blur(12px);
+                -webkit-backdrop-filter: blur(12px);
             }
 
-            #scrapbook-title {
-                font-size: 24px;
-                font-style: italic;
-                color: #C0185A;
+            #storybook-topbar-title {
+                font-size: 28px;
+                font-weight: 700;
+                letter-spacing: -0.05em;
             }
 
             #scrapbook-close,
-            #scrapbook-export-logs,
-            #scrapbook-viewer-close {
-                min-width: 48px;
-                min-height: 48px;
-                padding: 0 14px;
-                border: 1px solid rgba(192,24,90,0.14);
-                background: rgba(255,255,255,0.92);
-                color: #C0185A;
+            #storybook-back-to-cover,
+            #scrapbook-viewer-close,
+            .storybook-cover-chip,
+            .storybook-cycle-btn,
+            .storybook-action-btn {
+                min-height: 46px;
+                border: 1px solid rgba(173, 68, 118, 0.16);
+                background: rgba(255, 255, 255, 0.86);
+                color: var(--brand-ink);
                 border-radius: 999px;
                 cursor: pointer;
+                font-family: var(--font-ui);
+                font-weight: 700;
+                letter-spacing: 0.08em;
                 touch-action: manipulation;
             }
 
-            #scrapbook-export-logs {
-                font-size: 14px;
-            }
-
             #scrapbook-close,
             #scrapbook-viewer-close {
+                min-width: 48px;
                 font-size: 20px;
             }
 
-            #scrapbook-grid {
-                display: grid;
-                grid-template-columns: repeat(2, minmax(0, 1fr));
-                gap: 16px;
-                padding: 20px;
-            }
-
-            #scrapbook-empty {
-                padding: 72px 24px;
-                text-align: center;
-                font-size: 24px;
-                font-style: italic;
-                color: #C0185A;
-            }
-
-            .page-card {
-                background: #ffffff;
-                border-radius: 14px;
-                box-shadow: 0 4px 20px rgba(0,0,0,0.08);
-                overflow: hidden;
-                cursor: zoom-in;
-                transition: transform 0.2s ease;
+            #storybook-cover-stage {
+                min-height: calc(100dvh - 84px);
                 display: flex;
                 flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                padding: 18px 16px calc(env(safe-area-inset-bottom, 0px) + 24px);
             }
 
-            .page-card img {
+            #storybook-cover-copy {
+                width: min(92vw, 520px);
+                text-align: center;
+                margin-bottom: 18px;
+            }
+
+            .storybook-kicker {
+                font-family: var(--font-ui);
+                font-size: 11px;
+                font-weight: 700;
+                letter-spacing: 0.22em;
+                text-transform: uppercase;
+                color: rgba(154, 36, 97, 0.68);
+                margin-bottom: 10px;
+            }
+
+            .storybook-headline,
+            .storybook-feed-title {
+                font-size: clamp(24px, 4vw, 38px);
+                line-height: 1.05;
+                font-weight: 700;
+            }
+
+            #storybook-cover-art {
+                display: block;
+                width: min(76vw, 420px);
+                padding: 0;
+                border: 0;
+                background: transparent;
+                cursor: pointer;
+            }
+
+            #storybook-cover-image {
                 display: block;
                 width: 100%;
-                aspect-ratio: 4 / 5;
-                object-fit: contain;
-                background: #FFF7F2;
+                height: auto;
+                filter: drop-shadow(0 22px 34px rgba(124, 31, 79, 0.18));
             }
 
-            .page-card .card-caption {
-                padding: 10px 12px 4px;
+            #storybook-cover-hint {
+                margin-top: 16px;
+                font-family: var(--font-ui);
                 font-size: 12px;
-                font-style: italic;
-                line-height: 1.5;
-                color: #3a1a2a;
-            }
-
-            .page-card .card-world {
-                padding: 0 12px 10px;
-                font-family: "DM Mono", monospace;
-                font-size: 9px;
-                color: #FF2472;
+                font-weight: 700;
+                letter-spacing: 0.16em;
                 text-transform: uppercase;
-                letter-spacing: 1px;
-                overflow: hidden;
-                text-overflow: ellipsis;
-                white-space: nowrap;
+                color: rgba(154, 36, 97, 0.64);
             }
 
-            .washi-tape {
-                height: 14px;
-                width: 48px;
-                margin: 10px auto 4px;
-                border-radius: 2px;
-                opacity: 0.7;
-                transform: rotate(-2deg);
+            #storybook-cover-strip {
+                display: flex;
+                gap: 10px;
+                flex-wrap: wrap;
+                justify-content: center;
+                margin-top: 18px;
+            }
+
+            .storybook-cover-chip {
+                padding: 0 18px;
+            }
+
+            .storybook-cover-chip.is-active {
+                background: linear-gradient(180deg, rgba(255, 226, 239, 0.98), rgba(255, 246, 250, 0.98));
+                box-shadow: 0 10px 24px rgba(164, 51, 104, 0.12);
+            }
+
+            #storybook-feed-stage {
+                padding: 8px 12px calc(env(safe-area-inset-bottom, 0px) + 28px);
+            }
+
+            #storybook-feed-header {
+                display: flex;
+                align-items: center;
+                gap: 12px;
+                margin-bottom: 18px;
+            }
+
+            #storybook-back-to-cover {
+                padding: 0 18px;
+                flex: 0 0 auto;
+            }
+
+            #storybook-feed-copy {
+                min-width: 0;
+            }
+
+            #storybook-feed-list {
+                display: flex;
+                flex-direction: column;
+                gap: 18px;
+                width: min(100%, 760px);
+                margin: 0 auto;
+            }
+
+            #storybook-empty {
+                padding: 48px 20px;
+                text-align: center;
+                font-size: 28px;
+                line-height: 1.08;
+                color: rgba(154, 36, 97, 0.44);
+            }
+
+            .storybook-feed-card {
+                display: flex;
+                flex-direction: column;
+                gap: 14px;
+                padding: 16px;
+                background:
+                    linear-gradient(180deg, rgba(255, 255, 255, 0.76), rgba(255, 250, 252, 0.76)),
+                    var(--page-background);
+                background-size: cover;
+                background-position: center;
+                border-radius: 30px;
+                border: 1px solid rgba(173, 68, 118, 0.08);
+                box-shadow:
+                    0 14px 34px rgba(104, 37, 72, 0.08),
+                    inset 0 0 0 1px rgba(255, 255, 255, 0.32);
+            }
+
+            .storybook-media-button {
+                display: block;
+                padding: 0;
+                border: 0;
+                background: transparent;
+                cursor: zoom-in;
+                text-align: left;
+                width: 100%;
+            }
+
+            .storybook-media {
+                position: relative;
+                width: min(100%, 430px);
+                aspect-ratio: var(--media-aspect, 0.8);
+                margin: 0 auto;
+                overflow: hidden;
+                border-radius: 26px;
+                background: rgba(255, 255, 255, 0.68);
+                box-shadow:
+                    0 12px 28px rgba(104, 37, 72, 0.09),
+                    inset 0 0 0 1px rgba(255, 255, 255, 0.38);
+            }
+
+            .storybook-photo {
+                display: block;
+                width: 100%;
+                height: 100%;
+                object-fit: cover;
+                object-position: center;
+            }
+
+            .storybook-text {
+                display: flex;
+                flex-direction: column;
+                gap: 10px;
+                padding: 2px;
+            }
+
+            .storybook-caption-input {
+                width: 100%;
+                min-height: 80px;
+                resize: vertical;
+                border-radius: 20px;
+                border: 1px solid rgba(189, 132, 160, 0.24);
+                background: linear-gradient(180deg, rgba(255, 252, 245, 0.96), rgba(255, 248, 239, 0.96));
+                padding: 16px 18px;
+                color: rgba(122, 52, 88, 0.96);
+                font-family: var(--font-display);
+                font-size: clamp(18px, 2.3vw, 24px);
+                line-height: 1.18;
+                font-weight: 700;
+                box-shadow:
+                    0 8px 18px rgba(104, 37, 72, 0.06),
+                    inset 0 0 0 1px rgba(255, 255, 255, 0.55);
+                transform: rotate(-0.6deg);
+            }
+
+            .storybook-prompt {
+                font-size: 15px;
+                line-height: 1.4;
+                color: rgba(99, 45, 73, 0.76);
+            }
+
+            .storybook-meta {
+                font-family: var(--font-ui);
+                font-size: 11px;
+                font-weight: 700;
+                letter-spacing: 0.16em;
+                text-transform: uppercase;
+                color: rgba(154, 36, 97, 0.6);
+            }
+
+            .storybook-actions {
+                display: flex;
+                justify-content: flex-end;
+                gap: 10px;
+            }
+
+            .storybook-action-btn {
+                padding: 0 14px;
+                min-height: 42px;
+                font-size: 11px;
+            }
+
+            .storybook-action-btn.is-primary {
+                background: linear-gradient(180deg, rgba(255, 88, 169, 0.96), rgba(237, 58, 142, 0.96));
+                color: white;
+                border-color: rgba(206, 41, 120, 0.3);
+            }
+
+            .storybook-action-btn.is-danger {
+                background: rgba(103, 26, 61, 0.08);
+                color: rgba(103, 26, 61, 0.92);
             }
 
             #scrapbook-viewer {
                 position: fixed;
                 inset: 0;
                 z-index: 1100;
-                background: rgba(255, 246, 240, 0.992);
+                background: rgba(42, 16, 32, 0.72);
                 display: flex;
                 flex-direction: column;
                 align-items: center;
@@ -372,16 +722,16 @@ export class ScrapbookUI extends Behaviour {
                 width: min(92vw, 900px);
                 max-height: 72vh;
                 object-fit: contain;
-                background: #fffaf6;
-                border-radius: 18px;
-                box-shadow: 0 16px 50px rgba(0,0,0,0.12);
+                background: rgba(255, 255, 255, 0.78);
+                border-radius: 24px;
+                box-shadow: 0 22px 58px rgba(76, 27, 53, 0.26);
             }
 
             #scrapbook-viewer-caption {
                 width: min(92vw, 900px);
                 font-size: 16px;
                 line-height: 1.5;
-                color: #3a1a2a;
+                color: #fff7fb;
                 text-align: center;
             }
 
@@ -391,22 +741,29 @@ export class ScrapbookUI extends Behaviour {
                 right: 16px;
             }
 
-            @media (max-width: 480px) {
-                #scrapbook-grid {
-                    grid-template-columns: 1fr;
-                }
-
-                #scrapbook-header {
-                    padding-left: 16px;
-                    padding-right: 16px;
-                }
-
-                #scrapbook-title {
+            @media (max-width: 760px) {
+                #storybook-topbar-title {
                     font-size: 22px;
+                }
+
+                #storybook-cover-art {
+                    width: min(86vw, 420px);
+                }
+
+                .storybook-feed-card {
+                    padding: 14px;
+                }
+
+                .storybook-caption-input {
+                    min-height: 72px;
+                    font-size: 18px;
+                }
+
+                .storybook-prompt {
+                    font-size: 14px;
                 }
             }
         `;
-
         document.head.append(style);
     }
 }
